@@ -149,10 +149,18 @@ export default function Page() {
               <dd data-testid="stat-p50">{step.stats.p50.toFixed(1)} ms</dd>
               <dt>p95</dt>
               <dd data-testid="stat-p95">{step.stats.p95.toFixed(1)} ms</dd>
+              <dt>p99</dt>
+              <dd data-testid="stat-p99">{step.stats.p99.toFixed(1)} ms</dd>
               <dt>goodput</dt>
               <dd data-testid="stat-goodput">{step.stats.goodputRps.toFixed(1)} rps</dd>
+              <dt>offered</dt>
+              <dd data-testid="stat-offered-rps">{step.stats.offeredRps.toFixed(1)} rps</dd>
               <dt>error rate</dt>
               <dd data-testid="stat-error-rate">{(step.stats.errorRate * 100).toFixed(2)}%</dd>
+              <dt>requests</dt>
+              <dd data-testid="stat-total-requests">{step.stats.totalRequests.toLocaleString()}</dd>
+              <dt>failed</dt>
+              <dd data-testid="stat-total-failed">{step.stats.totalFailed.toLocaleString()}</dd>
             </dl>
           </section>
         ))}

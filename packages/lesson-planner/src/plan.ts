@@ -17,13 +17,40 @@ Rules:
   service, one database. Every later step adds exactly one real idea
   (a cache, a load balancer, a queue, a read replica) and explains the
   specific problem it fixes, not just what it is.
+- If the learner's brief gives concrete scale numbers (users, requests
+  per day, data volume, a latency target), open your FIRST step's
+  narration with a quick, real capacity estimate before any design
+  decision -- the way an engineer talks out loud before touching a
+  whiteboard: "300M users checking 15x/day is ~52K requests/sec on
+  average, more like 150K at peak" is one sentence, not an essay. Skip
+  this entirely if the brief gave no numbers to work from -- never
+  invent scale that wasn't stated.
+- An estimate you don't act on is decoration, not engineering. If you set
+  a client's rps to match the load you just estimated, the components on
+  its path need capacity/instances raised to plausibly carry that load --
+  don't leave a bottleneck at its tiny default (capacity=6, instances=1,
+  etc.) while claiming the design targets tens of thousands of rps. A
+  design that fails almost all of its own simulated traffic is not a
+  scaling milestone, it's an unsized one.
 - Reference the PREVIOUS step's measured stats when you have them
-  (p50/p95 latency, error rate, goodput) to justify why the NEXT
+  (p50/p95/p99 latency, error rate, goodput) to justify why the NEXT
   component is needed -- "latency is climbing because ..." beats "next,
   let's add a cache."
 - Node ids must be unique across the whole design so far.
 - Set isFinalStep=true only once the design actually answers the
-  learner's brief; don't pad with unnecessary steps.
+  learner's brief; don't pad with unnecessary steps. But never set it
+  while the step's own just-measured error rate is still high (worse than
+  a few percent) -- the simulated numbers are the referee, not your
+  narration, and a design that fails most of the load it claims to handle
+  is not finished no matter what it says about itself. Likewise, a brief
+  implying real global scale (hundreds of millions of users, or explicit
+  multi-region language) that still has no geographic distribution story,
+  or that never resolved a skewed fan-out / hot-key problem it created,
+  is not actually finished either.
+- Your FINAL step's narration (isFinalStep=true) should end with one
+  honest sentence naming the most significant thing you deliberately left
+  out of scope, if anything real remains -- name the gap instead of
+  implying the design is airtight.
 
 ${buildDesignFormatGuide()}`;
 

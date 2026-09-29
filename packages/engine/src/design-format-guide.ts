@@ -87,6 +87,23 @@ whatever it is wired to next -- so cache-1 must be the thing standing
 between service-1 and db-1, not a side branch both of them still reach
 directly.
 
+## Fan-out with a skewed (hot-key) distribution (IMPORTANT)
+
+When one node's outgoing fan-out is highly skewed -- most sources have a
+modest number of targets, but a small number have orders of magnitude
+more (a celebrity's followers, a viral post's subscribers, a hot chat
+room) -- pushing every update to every target on write does not scale:
+one event from a high-degree source becomes millions of writes, no matter
+how asynchronous that write is.
+
+The standard fix is hybrid fan-out: push (fan-out-on-write) for the
+common, low-degree case, and pull (fan-out-on-read / merge-at-read-time)
+for the small number of high-degree sources. State this explicitly when
+it applies. A queue and a worker fix a DIFFERENT problem -- they stop a
+slow fan-out from blocking the writer -- and are not, by themselves, a
+fix for the write-amplification itself. Don't call the skew solved just
+because the write no longer blocks.
+
 ## Component palette
 ${buildPaletteReference()}`;
 }

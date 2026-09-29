@@ -323,6 +323,68 @@ it, leaves the client and db nodes (and nothing else) standing, and the
 two survivors remain a valid, simulatable topology afterward -- not just
 "the deleted node disappeared," which would miss a dangling-edge bug.
 
+## A real staff-level interview audit, and what it actually found
+
+Asked directly: does a real session hold up against how a genuine FAANG
+staff-level system design interview is run, back-of-envelope math
+included? The honest way to answer that is to run one for real (Gemini,
+live, no mocking) with a real hard prompt -- "design Twitter's home
+timeline, 300M DAU, ~15 checks/day, p99 < 200ms, some accounts have tens
+of millions of followers" -- and read the actual transcript, not assume.
+
+**What the first real run found, all genuine gaps:**
+- Zero back-of-envelope arithmetic anywhere in 3 real steps, despite the
+  brief giving exact numbers to work from.
+- The classic crux of this exact question -- celebrity fan-out write
+  amplification -- was half-solved: a queue decoupled the WRITE from
+  blocking, but the actual write-amplification (one event, millions of
+  fan-out writes) was never named or addressed.
+- It self-terminated (`isFinalStep=true`) after only 3 steps for a
+  300M-DAU global system, with no wrap-up naming what was left out.
+- The interviewer's literal SLA metric, p99, was computed by the engine
+  and sent over the wire (`route.ts` sends the whole `SystemStats`
+  object) but never rendered by `page.tsx` -- there was no way to see
+  from the UI whether the one number that mattered was even met.
+
+**Fixes, each verified by re-running the identical prompt afterward:**
+- `page.tsx` now renders `p99`, `offeredRps`, `totalRequests`, and
+  `totalFailed` alongside p50/p95/goodput/error-rate -- data that was
+  always computed and transmitted, just dropped on the floor by the UI.
+- `plan.ts`'s `SYSTEM_PROMPT` now asks for a one-sentence real capacity
+  estimate in step 1's narration when the brief gives scale numbers, and
+  explicitly forbids inventing numbers when it doesn't.
+- `buildDesignFormatGuide()` (shared -- both the LLM planner and the MCP
+  server's `read_design_format` get this) now documents the hybrid
+  fan-out pattern (push for the common case, pull/merge-at-read for the
+  skewed/hot-key case) as a named worked example, the same way the
+  removeEdges insertion pattern already was.
+- `isFinalStep` guidance was tightened twice: a design may not call
+  itself finished while its own just-measured error rate is still high
+  ("the simulated numbers are the referee, not your narration"), and a
+  brief implying real global scale needs a geographic story or a resolved
+  hot-key problem before it's actually done.
+
+**The re-run genuinely changed** -- step 1's real narration became "300M
+users checking 15x/day is ~52K requests/sec on average, more like 150K at
+peak," and a later step's real narration correctly named the fix: "celebrity
+accounts use pull (fan-out-on-read), where their tweets are fetched
+dynamically and merged at read time." Both proven live, not asserted.
+
+**What it surfaced instead, reported the same way -- not smoothed over:**
+once the model started setting a client's `rps` to match its own real
+estimate (~50K-150K), it did NOT reliably raise `instances`/`capacity` on
+the components in that load's path to survive it, producing error rates
+in the high 90s%. The new isFinalStep rule correctly refused to call that
+"finished" -- a real improvement, since the FIRST run had wrongly claimed
+completion at 100% error -- but on a re-run it instead ran out its 3 retry
+attempts trying to fix the sizing and degraded gracefully
+(`StepExhaustedError`, `reason: step_exhausted`) rather than either
+crashing or lying about success. That is the correct failure mode, but it
+is still a failure mode: closing the loop from "here is my capacity
+estimate" to "here is a topology actually sized to survive it" is not
+solved by these prompt changes alone, and is the next real gap, not a
+hypothetical one.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is
