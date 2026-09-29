@@ -1,0 +1,128 @@
+[
+  {
+    "driver": "Gemini",
+    "brief": "A URL shortener that needs to handle 2000 requests per second",
+    "ok": true,
+    "attempts": 1,
+    "wallMs": 1593,
+    "stepTitle": "The Simplest Setup",
+    "nodeCount": 3,
+    "edgeCount": 2,
+    "stayedSimple": true,
+    "stats": {
+      "p50": 431.13221078693823,
+      "p95": 492.75959111540976,
+      "goodputRps": 194.44444444444446,
+      "errorRate": 0.9030470914127423
+    }
+  },
+  {
+    "driver": "DeepSeek",
+    "brief": "A URL shortener that needs to handle 2000 requests per second",
+    "ok": true,
+    "attempts": 1,
+    "wallMs": 2396,
+    "stepTitle": "Start with the simplest thing that works",
+    "nodeCount": 3,
+    "edgeCount": 2,
+    "stayedSimple": true,
+    "stats": {
+      "p50": 431.13221078693823,
+      "p95": 492.75959111540976,
+      "goodputRps": 194.44444444444446,
+      "errorRate": 0.9030470914127423
+    }
+  },
+  {
+    "driver": "Qwen",
+    "brief": "A URL shortener that needs to handle 2000 requests per second",
+    "ok": false,
+    "error": "No DASHSCOPE_API_KEY set -- skipped, not faked."
+  },
+  {
+    "driver": "Grok",
+    "brief": "A URL shortener that needs to handle 2000 requests per second",
+    "ok": false,
+    "error": "No XAI_API_KEY set -- skipped, not faked."
+  },
+  {
+    "driver": "Claude (direct)",
+    "brief": "A URL shortener that needs to handle 2000 requests per second",
+    "ok": true,
+    "attempts": 1,
+    "wallMs": 0,
+    "stepTitle": "The Simplest Setup",
+    "nodeCount": 3,
+    "edgeCount": 2,
+    "stayedSimple": true,
+    "stats": {
+      "p50": 431.13221078693823,
+      "p95": 492.75959111540976,
+      "goodputRps": 194.44444444444446,
+      "errorRate": 0.9030470914127423
+    }
+  },
+  {
+    "driver": "Gemini",
+    "brief": "A chat application that needs to support 50,000 concurrent users",
+    "ok": true,
+    "attempts": 1,
+    "wallMs": 1450,
+    "stepTitle": "The Simplest Chat Foundation",
+    "nodeCount": 3,
+    "edgeCount": 2,
+    "stayedSimple": true,
+    "stats": {
+      "p50": 47.37897570931091,
+      "p95": 100.33853211084079,
+      "goodputRps": 58.888888888888886,
+      "errorRate": 0
+    }
+  },
+  {
+    "driver": "DeepSeek",
+    "brief": "A chat application that needs to support 50,000 concurrent users",
+    "ok": true,
+    "attempts": 1,
+    "wallMs": 1736,
+    "stepTitle": "Start with the simplest thing that works",
+    "nodeCount": 3,
+    "edgeCount": 2,
+    "stayedSimple": true,
+    "stats": {
+      "p50": 53.778794924463,
+      "p95": 106.5627822900351,
+      "goodputRps": 43.333333333333336,
+      "errorRate": 0
+    }
+  },
+  {
+    "driver": "Qwen",
+    "brief": "A chat application that needs to support 50,000 concurrent users",
+    "ok": false,
+    "error": "No DASHSCOPE_API_KEY set -- skipped, not faked."
+  },
+  {
+    "driver": "Grok",
+    "brief": "A chat application that needs to support 50,000 concurrent users",
+    "ok": false,
+    "error": "No XAI_API_KEY set -- skipped, not faked."
+  },
+  {
+    "driver": "Claude (direct)",
+    "brief": "A chat application that needs to support 50,000 concurrent users",
+    "ok": true,
+    "attempts": 1,
+    "wallMs": 0,
+    "stepTitle": "The Simplest Setup",
+    "nodeCount": 3,
+    "edgeCount": 2,
+    "stayedSimple": true,
+    "stats": {
+      "p50": 404.26445533526567,
+      "p95": 467.98665083442137,
+      "goodputRps": 212.22222222222223,
+      "errorRate": 0.5736607142857143
+    }
+  }
+]

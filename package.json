@@ -1,0 +1,17 @@
+{
+  "name": "systemsage",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Agent-driven, narrated system design tutor. Real discrete-event simulation, not decorative diagrams.",
+  "scripts": {
+    "dev": "pnpm --filter @systemsage/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @systemsage/e2e test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@12.8.1"
+}

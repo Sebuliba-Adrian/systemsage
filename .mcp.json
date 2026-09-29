@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "systemsage": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": ["--filter", "@systemsage/mcp-server", "start"]
+    }
+  }
+}

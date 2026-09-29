@@ -1,0 +1,19 @@
+{
+  "name": "@systemsage/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "compare-providers": "tsx compare-providers.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@systemsage/engine": "workspace:*",
+    "@systemsage/lesson-planner": "workspace:*",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0"
+  }
+}

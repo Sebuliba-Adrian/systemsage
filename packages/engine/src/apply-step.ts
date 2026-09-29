@@ -1,0 +1,108 @@
+/*
+ * The single, shared implementation of "merge a proposed change onto a
+ * topology, lay it out, and validate it." Used by BOTH drivers of this
+ * project: the hosted Gemini planner (packages/lesson-planner) and the
+ * MCP server a coding agent drives directly (packages/mcp-server). Extracted
+ * here specifically so those two paths cannot drift into two different
+ * ideas of what a valid step is -- whichever agent proposes a step, Gemini
+ * internally or Claude Code/Codex through MCP, the exact same code decides
+ * whether it's accepted.
+ *
+ * Returns a result object rather than throwing, and collects every error in
+ * one pass rather than stopping at the first -- the same shape Breakscale's
+ * own buildTopology uses ("buildTopology gives better errors than a schema
+ * can"), so a caller (human or agent) gets everything wrong with an attempt
+ * in one round trip instead of discovering problems one at a time.
+ */
+import { defaultConfig } from './sim/presets';
+import type { NodeConfig, NodeKind, SimEdge, SimNode, Topology } from './sim/types';
+import { isTopology } from './topology-schema';
+import { assignLayout } from './layout';
+
+export interface StepNode {
+  id: string;
+  kind: NodeKind;
+  label: string;
+  config?: Partial<NodeConfig>;
+}
+
+export interface StepEdge {
+  from: string;
+  to: string;
+}
+
+export interface StepDiff {
+  addNodes: StepNode[];
+  addEdges: StepEdge[];
+  removeEdges: StepEdge[];
+}
+
+export type ApplyStepResult = { ok: true; topology: Topology } | { ok: false; errors: string[] };
+
+function toSimNode(n: StepNode): SimNode {
+  const base = defaultConfig(n.kind) as NodeConfig;
+  return {
+    id: n.id,
+    kind: n.kind,
+    label: n.label,
+    // Real values come from assignLayout below; NaN is an explicit,
+    // detectable "not yet positioned" placeholder, never a silent 0,0.
+    x: NaN,
+    y: NaN,
+    config: { ...base, ...n.config },
+  };
+}
+
+function toSimEdge(e: StepEdge, index: number): SimEdge {
+  return { id: `${e.from}->${e.to}-${index}`, from: e.from, to: e.to, weight: 1 };
+}
+
+export function applyStep(current: Topology, diff: StepDiff): ApplyStepResult {
+  const errors: string[] = [];
+
+  const existingIds = new Set(current.nodes.map((n) => n.id));
+  for (const n of diff.addNodes) {
+    if (existingIds.has(n.id)) {
+      errors.push(
+        `Reused an existing node id: "${n.id}". Every id in addNodes must be new. ` +
+          `Existing ids: ${[...existingIds].join(', ')}.`,
+      );
+    }
+  }
+
+  for (const r of diff.removeEdges) {
+    const exists = current.edges.some((e) => e.from === r.from && e.to === r.to);
+    if (!exists) {
+      const currentEdges = current.edges.map((e) => `${e.from}->${e.to}`).join(', ') || '(none)';
+      errors.push(
+        `Tried to remove a nonexistent edge: "${r.from}->${r.to}". ` +
+          `Edges that currently exist: ${currentEdges}.`,
+      );
+    }
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  const survivingEdges = current.edges.filter(
+    (e) => !diff.removeEdges.some((r) => r.from === e.from && r.to === e.to),
+  );
+
+  const nodes = [...current.nodes, ...diff.addNodes.map(toSimNode)];
+  const edges = [...survivingEdges, ...diff.addEdges.map((e, i) => toSimEdge(e, survivingEdges.length + i))];
+
+  assignLayout(nodes, edges);
+
+  const topology: Topology = { nodes, edges };
+  if (!isTopology(topology)) {
+    return {
+      ok: false,
+      errors: [
+        'The merged topology failed structural validation (isTopology). Common ' +
+          'causes: an edge referencing a node id that does not exist, or a ' +
+          'config value of the wrong type.',
+      ],
+    };
+  }
+
+  return { ok: true, topology };
+}

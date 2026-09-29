@@ -1,0 +1,19 @@
+{
+  "name": "@systemsage/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@systemsage/engine": "workspace:*",
+    "@systemsage/lesson-planner": "workspace:*",
+    "@systemsage/mcp-server": "workspace:*",
+    "ai": "^7.0.0",
+    "@modelcontextprotocol/sdk": "^1.31.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "typescript": "^5.7.0"
+  }
+}
