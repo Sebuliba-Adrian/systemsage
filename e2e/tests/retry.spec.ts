@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { NoObjectGeneratedError } from 'ai';
-import { planNextStep, type StepGenerator, type LessonStep } from '@systemsage/lesson-planner';
+import { planNextStep, StepExhaustedError, type StepGenerator, type LessonStep } from '@systemsage/lesson-planner';
 import { defaultConfig, type Topology } from '@systemsage/engine';
 
 /*
@@ -106,4 +106,28 @@ test('exhausting all retries fails loudly with the last real reason, not silentl
       { generate: scripted },
     ),
   ).rejects.toThrow(/failed 3 attempts/);
+});
+
+test('exhaustion throws StepExhaustedError specifically, not a plain Error -- this is what lets the SSE route tell "ran out of tries" apart from an unexpected crash and degrade gracefully instead of surfacing a raw exception', async () => {
+  // Real failure mode, not hypothetical: a stress test against DeepSeek
+  // (see ARCHITECTURE.md) produced this exact class of failure live, mid
+  // real session, on a real step.
+  const scripted: StepGenerator = async () => {
+    throw fakeSchemaFailure();
+  };
+
+  let caught: unknown;
+  try {
+    await planNextStep(
+      { description: 'A URL shortener', priorSteps: [], currentTopology: EMPTY_TOPOLOGY },
+      { generate: scripted },
+    );
+  } catch (err) {
+    caught = err;
+  }
+
+  expect(caught).toBeInstanceOf(StepExhaustedError);
+  const exhausted = caught as StepExhaustedError;
+  expect(exhausted.retryReasons).toHaveLength(3);
+  expect(exhausted.retryReasons[0]).toContain('schema validation');
 });

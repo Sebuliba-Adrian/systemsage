@@ -17,7 +17,7 @@
 import { defaultConfig } from './sim/presets';
 import type { NodeConfig, NodeKind, SimEdge, SimNode, Topology } from './sim/types';
 import { isTopology } from './topology-schema';
-import { assignLayout } from './layout';
+import { assignLayout, GraphCycleError } from './layout';
 
 export interface StepNode {
   id: string;
@@ -90,7 +90,17 @@ export function applyStep(current: Topology, diff: StepDiff): ApplyStepResult {
   const nodes = [...current.nodes, ...diff.addNodes.map(toSimNode)];
   const edges = [...survivingEdges, ...diff.addEdges.map((e, i) => toSimEdge(e, survivingEdges.length + i))];
 
-  assignLayout(nodes, edges);
+  try {
+    assignLayout(nodes, edges);
+  } catch (err) {
+    // A real, live crash found under stress testing (RangeError: Invalid
+    // array length, from an unbounded BFS on a cyclic graph) turned into
+    // a proper validation error here instead -- same discipline as every
+    // other check in this function: report it specifically, let the
+    // caller retry with feedback, never crash the caller.
+    if (err instanceof GraphCycleError) return { ok: false, errors: [err.message] };
+    throw err;
+  }
 
   const topology: Topology = { nodes, edges };
   if (!isTopology(topology)) {

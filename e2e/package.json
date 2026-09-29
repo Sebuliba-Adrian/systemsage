@@ -9,8 +9,10 @@
     "@systemsage/engine": "workspace:*",
     "@systemsage/lesson-planner": "workspace:*",
     "@systemsage/mcp-server": "workspace:*",
+    "@systemsage/narrator": "workspace:*",
     "ai": "^7.0.0",
-    "@modelcontextprotocol/sdk": "^1.31.0"
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "dotenv": "^16.4.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

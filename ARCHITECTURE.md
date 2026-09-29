@@ -206,6 +206,74 @@ step (p50 47-54ms, 0% errors) than Claude's own hand-authored one (p50
 manual design choice, kept rather than smoothed over, exactly per this
 project's own faithfulness standard.
 
+## Two crashes found by real concurrent stress testing, not by unit tests
+
+Both of these were found the same way: firing several real, full-length
+(8-step) sessions at DeepSeek concurrently (chosen because its JSON-schema
+mode is a compatibility shim, not native, and is measurably more
+failure-prone than Gemini's), the way a learner's browser tab could
+plausibly overlap with someone else's session on a shared server, rather
+than trusting that scripted/mocked tests had already covered every real
+failure mode.
+
+**A live process crash, `RangeError: Invalid array length`.** Two of four
+concurrent real DeepSeek sessions crashed outright. The first hypothesis
+(unbounded array growth in Breakscale's shard/replica sizing) was wrong --
+`effectiveInstances()` and `clampInt` already guard every one of those call
+sites. The real cause was only found after fixing a second, quieter bug:
+`apps/web/app/api/design-session/route.ts` was logging only `err.message`
+to the client and nothing at all server-side, so the actual stack trace
+was never captured on the first crash. Once errors were logged in full
+server-side (`console.error` with the whole error object, always, even
+though only a sanitized message goes to the client), reproducing the crash
+gave a real stack trace pointing at `assignLayout`'s depth-relaxation BFS
+in `packages/engine/src/layout.ts`: it had no cycle detection, so a real
+model output whose edges happened to form a loop (A -> B -> ... -> A) sent
+every node's depth up by one on every pass around the cycle, forever,
+until `Array.push` overflowed.
+
+Fixed with a mathematical bound, not a heuristic: in a graph of N nodes, no
+node in an actual DAG can need a depth greater than N-1 (the longest
+possible simple path visits every node once), so a depth exceeding N is
+proof of a cycle. `GraphCycleError` is thrown at that bound and caught in
+`apply-step.ts`, turned into a normal `{ok:false, errors:[...]}` result --
+the same recoverable-failure path every other validation error already
+goes through, so a cyclic step gets retried with specific feedback instead
+of crashing the process. Proven with `e2e/tests/graph-cycle.spec.ts`: a
+3-node cycle and a self-loop are both caught with a "cycle" message, and,
+just as importantly, a real non-cyclic fan-out/fan-in diamond shape is
+proven NOT to trip the same check. Re-ran the exact concurrent scenario
+that originally crashed (6 parallel real DeepSeek sessions on the same
+brief) twice more afterward: the cycle recurred organically both times and
+both times degraded gracefully instead of crashing anything.
+
+That graceful degradation needed its own fix. A step that fails all 3
+retry attempts (whether from a real cycle or any other recoverable-but-
+persistent failure) used to end the whole SSE session in a raw `error`
+event, throwing away every prior step that had already succeeded. Fixed by
+giving that specific condition its own type, `StepExhaustedError`, thrown
+by `planNextStep` in `packages/lesson-planner/src/plan.ts` instead of a
+plain `Error`, and caught specifically in `route.ts` to emit a `done` event
+with `reason: 'step_exhausted'` and the last step's failure message,
+keeping every step that did succeed. Confirmed live, twice, on real
+DeepSeek sessions that organically exhausted retries: the browser showed
+several real completed steps followed by a clean "stopped after N steps"
+state, never a raw error screen.
+
+**`TypeError: Invalid state: Controller is already closed`.** Found via
+the same new server-side logging on a later full-suite run. A client that
+disconnects mid-stream (tab closed, a test ending early) closes the
+`ReadableStream` on its end; a subsequent `controller.enqueue()` or
+`controller.close()` on the server then throws, because the stream is
+already gone -- not an application error, just a reader that left. Fixed
+using the Streams API's own hook for this: a `cancel()` method on the
+stream, called automatically on disconnect, which sets a `clientGone` flag
+shared with `start()`. `send()` checks that flag before every `enqueue`
+and swallows the (now expected) throw if the client left in the gap
+between the check and the call; the `finally` block's `controller.close()`
+is wrapped the same way. Confirmed fixed by re-running the full e2e suite
+after the fix landed: zero recurrences.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is

@@ -1,4 +1,4 @@
-export { planNextStep, createProviderGenerator, type PlanContext, type PlannedStep, type StepGenerator } from './plan';
+export { planNextStep, createProviderGenerator, StepExhaustedError, type PlanContext, type PlannedStep, type StepGenerator } from './plan';
 export { LessonStepSchema, type LessonStep } from './schema';
 export { buildPaletteReference } from './palette';
 export { assignLayout } from './layout';

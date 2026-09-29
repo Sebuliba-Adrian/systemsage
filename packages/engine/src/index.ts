@@ -12,7 +12,7 @@ import type { SystemStats, Topology } from './sim/types';
 export { NODE_KINDS, isTopology } from './topology-schema';
 export type { NodeConfig, NodeKind, SimEdge, SimNode, SystemStats, Topology } from './sim/types';
 export { defaultConfig } from './sim/presets';
-export { assignLayout } from './layout';
+export { assignLayout, GraphCycleError } from './layout';
 export { applyStep, type ApplyStepResult, type StepDiff, type StepEdge, type StepNode } from './apply-step';
 export { buildDesignFormatGuide, buildPaletteReference } from './design-format-guide';
 

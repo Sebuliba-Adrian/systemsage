@@ -36,6 +36,10 @@ export interface PlanContext {
 export interface PlannedStep {
   step: LessonStep;
   topology: Topology;
+  /** How many tries this step took. 1 means it succeeded first try -- no retry needed. */
+  attempts: number;
+  /** One entry per FAILED attempt (so length is attempts-1), the real reason each one was rejected. */
+  retryReasons: string[];
 }
 
 /**
@@ -82,6 +86,25 @@ class StepAttemptError extends Error {
   }
 }
 
+/**
+ * Thrown when every attempt failed. Exported (not just an internal Error)
+ * specifically so a caller like the SSE route can tell "this step
+ * genuinely exhausted MAX_ATTEMPTS" apart from an unexpected failure
+ * (network error, missing key) and degrade gracefully instead of
+ * surfacing a raw exception -- a real, live failure mode a stress test
+ * against a real, more failure-prone provider actually produced (see
+ * ARCHITECTURE.md), not a hypothetical worth guarding against blindly.
+ */
+export class StepExhaustedError extends Error {
+  constructor(
+    message: string,
+    readonly retryReasons: string[],
+  ) {
+    super(message);
+    this.name = 'StepExhaustedError';
+  }
+}
+
 function buildUserPrompt(ctx: PlanContext, feedback?: string): string {
   const lines = [`Learner's brief: ${ctx.description}`];
   if (ctx.priorSteps.length === 0) {
@@ -111,11 +134,16 @@ function buildUserPrompt(ctx: PlanContext, feedback?: string): string {
  * immediately -- retrying THOSE would just burn attempts on something no
  * amount of corrective prompting fixes.
  */
+interface StepAttemptResult {
+  step: LessonStep;
+  topology: Topology;
+}
+
 async function attemptStep(
   ctx: PlanContext,
   feedback: string | undefined,
   generate: StepGenerator,
-): Promise<PlannedStep> {
+): Promise<StepAttemptResult> {
   let step: LessonStep;
   try {
     const result = await generate({ system: SYSTEM_PROMPT, prompt: buildUserPrompt(ctx, feedback) });
@@ -168,18 +196,22 @@ export async function planNextStep(
   const generate = deps.generate ?? (deps.provider ? createProviderGenerator(deps.provider) : defaultGenerate);
   let feedback: string | undefined;
   let lastError: StepAttemptError | undefined;
+  const retryReasons: string[] = [];
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      return await attemptStep(ctx, feedback, generate);
+      const result = await attemptStep(ctx, feedback, generate);
+      return { ...result, attempts: attempt, retryReasons };
     } catch (err) {
       if (!(err instanceof StepAttemptError)) throw err;
       lastError = err;
       feedback = err.feedback;
+      retryReasons.push(err.message);
     }
   }
 
-  throw new Error(
+  throw new StepExhaustedError(
     `Planner failed ${MAX_ATTEMPTS} attempts in a row. Last failure: ${lastError?.message}`,
+    retryReasons,
   );
 }

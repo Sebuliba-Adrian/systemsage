@@ -4,6 +4,31 @@ const X_STEP = 220;
 const Y_STEP = 120;
 
 /**
+ * Thrown when the graph contains a cycle. A REAL, live crash found under
+ * stress testing, not a hypothetical: the depth-relaxation loop below has
+ * no termination guarantee on a cyclic graph (A -> B -> A means every pass
+ * around the cycle increases both nodes' depth by one, forever), and it
+ * crashed with "RangeError: Invalid array length" once the BFS queue grew
+ * past what Array.push can hold. In a graph with N nodes, no node in a
+ * real DAG can legitimately need a depth greater than N-1 -- the longest
+ * possible simple path visits every node once -- so exceeding that bound
+ * is mathematical proof of a cycle, not a coincidence, and is now detected
+ * and reported instead of looped on forever.
+ */
+export class GraphCycleError extends Error {
+  constructor(readonly nodeId: string) {
+    super(
+      `Layout detected a cycle reachable from node "${nodeId}": its depth ` +
+        'would have to exceed the total number of nodes, which is only ' +
+        'possible if the edges form a loop. Review the edges you just ' +
+        'added or removed for one that routes back to something upstream ' +
+        'of itself.',
+    );
+    this.name = 'GraphCycleError';
+  }
+}
+
+/**
  * Assigns x/y to every node that doesn't have one yet, left to right by
  * BFS depth from the client nodes (matching Breakscale's own "requests
  * flow left to right" convention), stacking nodes at the same depth
@@ -43,8 +68,10 @@ export function assignLayout(nodes: SimNode[], edges: SimEdge[]): void {
     for (const childId of children.get(id) ?? []) {
       if (!byId.has(childId)) continue;
       const existing = depthOf.get(childId);
-      if (existing === undefined || existing < depth + 1) {
-        depthOf.set(childId, depth + 1);
+      const nextDepth = depth + 1;
+      if (nextDepth > nodes.length) throw new GraphCycleError(childId);
+      if (existing === undefined || existing < nextDepth) {
+        depthOf.set(childId, nextDepth);
         queue.push(childId);
       }
     }
