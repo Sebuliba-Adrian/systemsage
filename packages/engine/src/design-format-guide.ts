@@ -87,6 +87,32 @@ whatever it is wired to next -- so cache-1 must be the thing standing
 between service-1 and db-1, not a side branch both of them still reach
 directly.
 
+## Sizing a component to survive the load you estimated (IMPORTANT)
+
+An estimate you don't size against is decoration, not engineering. For
+most kinds, the rough ceiling of ONE component is:
+
+    ceiling_rps ~= instances * capacity / (serviceMs / 1000)
+
+e.g. a \`db\` at its default capacity=6, serviceMs=30, instances=1 tops out
+around 200 rps; instances=8 tops out around 1,600 rps. A component with a
+\`hitRate\` (cache, cdn) only has to survive the MISS share of the traffic
+that reaches it -- (1 - hitRate) of it -- since a hit never reaches
+whatever the component is wired to next.
+
+When you know the peak rps a component's path needs to carry (from your
+own estimate, or from the previous step's measured \`offeredRps\`), raise
+that component's \`instances\` (or, where it makes more sense, add a
+sibling instance / shard / read replica as its own node) until its
+ceiling clears the load with real headroom -- sizing exactly to the edge
+means one bad request cascades into an outage. This formula is a rough
+starting point, not the final answer: it ignores queueing, variance
+(\`serviceCv\`), and each kind's own quirks (a \`db\`'s write lock tax, an
+\`objectstore\`'s per-prefix limit, and so on). The step's own MEASURED
+error rate and latency, once you propose it, are the real check -- if
+they're still bad, the sizing was wrong; raise it again rather than
+declaring the step done.
+
 ## Fan-out with a skewed (hot-key) distribution (IMPORTANT)
 
 When one node's outgoing fan-out is highly skewed -- most sources have a

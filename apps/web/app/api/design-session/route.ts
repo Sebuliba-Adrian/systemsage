@@ -1,5 +1,5 @@
 import { planNextStep, StepExhaustedError, type LessonStep, type ProviderId } from '@systemsage/lesson-planner';
-import { simulate, type Topology } from '@systemsage/engine';
+import type { Topology } from '@systemsage/engine';
 
 /*
  * One design session, one SSE stream. See ARCHITECTURE.md: this contract
@@ -89,7 +89,7 @@ export async function POST(req: Request): Promise<Response> {
           try {
             planned = await planNextStep(
               { description, priorSteps, currentTopology: topology },
-              provider ? { provider } : {},
+              { seed: SEED, simulatedSeconds: SIMULATED_SECONDS, ...(provider ? { provider } : {}) },
             );
           } catch (err) {
             if (err instanceof StepExhaustedError) {
@@ -108,15 +108,13 @@ export async function POST(req: Request): Promise<Response> {
           topology = planned.topology;
           priorSteps.push(planned.step);
 
-          const result = simulate(topology, { seed: SEED, simulatedSeconds: SIMULATED_SECONDS });
-
           send('step', {
             index,
             stepTitle: planned.step.stepTitle,
             narration: planned.step.narration,
             topology,
-            stats: result.stats,
-            seed: result.seed,
+            stats: planned.stats,
+            seed: SEED,
             isFinalStep: planned.step.isFinalStep,
             attempts: planned.attempts,
             retryReasons: planned.retryReasons,

@@ -131,3 +131,79 @@ test('exhaustion throws StepExhaustedError specifically, not a plain Error -- th
   expect(exhausted.retryReasons).toHaveLength(3);
   expect(exhausted.retryReasons[0]).toContain('schema validation');
 });
+
+/*
+ * Regression test for a real live failure: asking nicely in the system
+ * prompt was proven NOT enough to stop a model from declaring
+ * isFinalStep=true at a 99%+ measured error rate (see ARCHITECTURE.md).
+ * This is the code-level backstop -- attemptStep now actually runs the
+ * real simulate() and rejects the claim with the real numbers, the same
+ * StepAttemptError/retry shape every other check in plan.ts already uses.
+ */
+
+function overloadedFinalStep(sized = false): LessonStep {
+  const bigConfig = sized ? { capacity: 100000, queueLimit: 100000, serviceCv: 0 } : undefined;
+  return {
+    stepTitle: 'Everything At Once',
+    narration: 'This is definitely finished.',
+    addNodes: [
+      // capacity=5000 and a generous timeout on the client itself so
+      // admission/timeout at the SOURCE is never the bottleneck being
+      // tested -- only service/db sizing varies between the overloaded
+      // and sized variants below.
+      { id: 'client-1', kind: 'client', label: 'Client', config: { rps: 5000, capacity: 5000, timeoutMs: 60000 } },
+      { id: 'service-1', kind: 'service', label: 'API', config: bigConfig },
+      { id: 'db-1', kind: 'db', label: 'DB', config: bigConfig },
+    ],
+    addEdges: [
+      { from: 'client-1', to: 'service-1' },
+      { from: 'service-1', to: 'db-1' },
+    ],
+    removeEdges: [],
+    isFinalStep: true,
+  };
+}
+
+test('isFinalStep=true at a catastrophic measured error rate is rejected with the real numbers, not accepted', async () => {
+  let calls = 0;
+  let feedbackSeenOnRetry: string | undefined;
+
+  const scripted: StepGenerator = async ({ prompt }) => {
+    calls += 1;
+    // Attempt 1: default (tiny) capacity against a 5000rps client -- the
+    // exact real shape that fooled the prompt-only version of this check.
+    if (calls === 1) return { object: overloadedFinalStep() };
+    feedbackSeenOnRetry = prompt;
+    // Attempt 2: sized generously enough to actually survive 5000rps.
+    return { object: overloadedFinalStep(true) };
+  };
+
+  const result = await planNextStep(
+    { description: 'A huge system', priorSteps: [], currentTopology: EMPTY_TOPOLOGY },
+    { generate: scripted },
+  );
+
+  expect(calls).toBe(2);
+  expect(result.step.isFinalStep).toBe(true);
+  expect(result.stats.errorRate).toBeLessThan(0.05);
+  expect(feedbackSeenOnRetry).toContain('but the real simulated error rate came back at');
+  expect(feedbackSeenOnRetry).toContain('Measured this attempt: p50=');
+});
+
+test('a NON-final step with a high measured error rate is NOT rejected -- an intermediate step is allowed to look broken', async () => {
+  // The whole pedagogical point of this tool is watching p95/error rate
+  // get WORSE before the next step fixes it. The isFinalStep gate must
+  // only fire on the "done" claim, never on an honestly-still-broken
+  // intermediate step.
+  const scripted: StepGenerator = async () => ({
+    object: { ...overloadedFinalStep(), isFinalStep: false },
+  });
+
+  const result = await planNextStep(
+    { description: 'A huge system', priorSteps: [], currentTopology: EMPTY_TOPOLOGY },
+    { generate: scripted },
+  );
+
+  expect(result.attempts).toBe(1);
+  expect(result.stats.errorRate).toBeGreaterThan(0.5);
+});

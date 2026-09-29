@@ -385,6 +385,61 @@ estimate" to "here is a topology actually sized to survive it" is not
 solved by these prompt changes alone, and is the next real gap, not a
 hypothetical one.
 
+## The isFinalStep integrity check is now code, not a request
+
+The prompt already asked a model not to set `isFinalStep=true` while its
+own measured error rate was still high. A live re-run proved that asking
+is not enough: a real Gemini session set `client.rps` to match its own
+correct capacity estimate, never sized the components on that load's
+path, and still declared *"Design complete"* at a **99.39% measured error
+rate** -- the instruction was right there in the system prompt, and the
+model ignored it anyway.
+
+Every other integrity check in this codebase (`removeEdges` naming a real
+edge, `GraphCycleError`, `isTopology`) is enforced in code and fed back
+through the SAME retry mechanism, never left as prose in a prompt. This
+was the one exception, and it no longer is: `attemptStep` in
+`packages/lesson-planner/src/plan.ts` now runs the real `simulate()` call
+itself (once, right after `applyStep` succeeds) and throws a
+`StepAttemptError` -- the exact mechanism every other check already
+uses -- if `isFinalStep=true` and the measured error rate exceeds
+`FINAL_STEP_MAX_ERROR_RATE` (5%), handing back the real numbers (p50/p95/
+p99/goodput/offered/error rate) so the retry has something specific to
+react to, not a generic "try again." `PlannedStep` now carries that same
+`stats` object back to the caller, so `route.ts` no longer runs a second,
+separate `simulate()` call that could in principle drift from what was
+actually checked -- there is exactly one simulate() per step now, and its
+result is both the gate and the displayed stats.
+
+Proven two ways. First, a scripted regression test
+(`e2e/tests/retry.spec.ts`): an intentionally overloaded topology
+(`client.rps=5000` against default-sized components) that claims
+`isFinalStep=true` is rejected with the real measured numbers in the
+feedback text, then accepted once a retry actually sizes `capacity`/
+`queueLimit` generously enough to survive the load -- and, just as
+importantly, a second test proves a NON-final step is never rejected for
+having a high error rate, since watching a step look broken before the
+next one fixes it is the entire pedagogical point of this tool; the gate
+must only fire on the "done" claim.
+
+Second, re-running the identical live Gemini brief that originally found
+the bug: this time it correctly ran out its retries and degraded
+gracefully (`step_exhausted`, no false "finished" claim) on one attempt,
+and on another attempt actually converged to a genuinely finished design
+-- 0% measured error, the hybrid fan-out pattern correctly built with a
+`streambroker` and `worker` nodes, `isFinalStep=true` correctly accepted.
+Both are the right outcome for the case that occurred; neither is a lie
+about success.
+
+**One nuance worth reporting honestly, not glossed over:** on the run that
+converged, the model set `client.rps=1000`, not the ~52K-150K it had just
+calculated out loud. Whether that is a legitimate technique (model one
+representative shard rather than the full aggregate) or the model quietly
+avoiding the harder sizing problem by testing an easier number is not
+something one run can distinguish -- it would take many repeated runs to
+see whether this is a pattern or ordinary sampling variance. Recorded
+here as an open question, not asserted as either.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is

@@ -1,10 +1,25 @@
 import { generateObject, NoObjectGeneratedError } from 'ai';
-import { applyStep, buildDesignFormatGuide, type Topology } from '@systemsage/engine';
+import { applyStep, buildDesignFormatGuide, simulate, type SystemStats, type Topology } from '@systemsage/engine';
 import { LessonStepSchema, type LessonStep } from './schema';
 import { createModel, type ProviderId } from './providers';
 
 const MAX_ATTEMPTS = 3;
 const DEFAULT_PROVIDER: ProviderId = 'gemini';
+const DEFAULT_SEED = 1;
+const DEFAULT_SIMULATED_SECONDS = 30;
+
+/**
+ * The ceiling a step's own MEASURED error rate must clear before
+ * isFinalStep=true is accepted. This exists because asking nicely in the
+ * prompt was proven, live, not to be enough: a real Gemini session set a
+ * client's rps to match its own correct capacity estimate, never sized
+ * the components on that load's path, and still declared "Design
+ * complete" at a 99.39% measured error rate -- the prompt said not to,
+ * and it did anyway. Every other integrity check in this codebase
+ * (removeEdges, GraphCycleError, isTopology) is enforced in code, not
+ * requested in prose; this one was the odd one out until now.
+ */
+const FINAL_STEP_MAX_ERROR_RATE = 0.05;
 
 const SYSTEM_PROMPT = `You are a system design tutor. A learner describes a system they want
 to build, and you teach it by building ONE component (or a small tightly
@@ -39,14 +54,15 @@ Rules:
 - Node ids must be unique across the whole design so far.
 - Set isFinalStep=true only once the design actually answers the
   learner's brief; don't pad with unnecessary steps. But never set it
-  while the step's own just-measured error rate is still high (worse than
-  a few percent) -- the simulated numbers are the referee, not your
-  narration, and a design that fails most of the load it claims to handle
-  is not finished no matter what it says about itself. Likewise, a brief
-  implying real global scale (hundreds of millions of users, or explicit
-  multi-region language) that still has no geographic distribution story,
-  or that never resolved a skewed fan-out / hot-key problem it created,
-  is not actually finished either.
+  while the step's own just-measured error rate would still be above 5%
+  -- this is checked for real after you respond, not just requested here,
+  so a design that fails most of the load it claims to handle will be
+  rejected and handed back to you with the real numbers, no matter what
+  the narration says about itself. Likewise, a brief implying real global
+  scale (hundreds of millions of users, or explicit multi-region
+  language) that still has no geographic distribution story, or that
+  never resolved a skewed fan-out / hot-key problem it created, is not
+  actually finished either.
 - Your FINAL step's narration (isFinalStep=true) should end with one
   honest sentence naming the most significant thing you deliberately left
   out of scope, if anything real remains -- name the gap instead of
@@ -63,6 +79,14 @@ export interface PlanContext {
 export interface PlannedStep {
   step: LessonStep;
   topology: Topology;
+  /**
+   * The real simulate() result for this step's topology -- computed once,
+   * here, both to enforce FINAL_STEP_MAX_ERROR_RATE and to hand back to
+   * the caller, so a route displaying these stats never has to re-run the
+   * simulation (and can never silently drift from what was actually
+   * checked).
+   */
+  stats: SystemStats;
   /** How many tries this step took. 1 means it succeeded first try -- no retry needed. */
   attempts: number;
   /** One entry per FAILED attempt (so length is attempts-1), the real reason each one was rejected. */
@@ -164,12 +188,14 @@ function buildUserPrompt(ctx: PlanContext, feedback?: string): string {
 interface StepAttemptResult {
   step: LessonStep;
   topology: Topology;
+  stats: SystemStats;
 }
 
 async function attemptStep(
   ctx: PlanContext,
   feedback: string | undefined,
   generate: StepGenerator,
+  simOpts: { seed: number; simulatedSeconds: number },
 ): Promise<StepAttemptResult> {
   let step: LessonStep;
   try {
@@ -203,7 +229,27 @@ async function attemptStep(
     );
   }
 
-  return { step, topology: result.topology };
+  const stats = simulate(result.topology, simOpts).stats;
+
+  // The check a system prompt can only ask for, never enforce: a real
+  // live session proved a model will set isFinalStep=true at a 99%+
+  // measured error rate anyway, despite the prompt saying not to. This is
+  // the code-level backstop, in the same shape as every other check
+  // above -- reject with the SPECIFIC real numbers, let the retry fix it.
+  if (step.isFinalStep && stats.errorRate > FINAL_STEP_MAX_ERROR_RATE) {
+    throw new StepAttemptError(
+      `Step "${step.stepTitle}" claimed isFinalStep=true at a ${(stats.errorRate * 100).toFixed(1)}% measured error rate`,
+      `Your step "${step.stepTitle}" set isFinalStep=true, but the real simulated error rate came back at ` +
+        `${(stats.errorRate * 100).toFixed(1)}% -- far above the ${(FINAL_STEP_MAX_ERROR_RATE * 100).toFixed(0)}% ceiling for a ` +
+        `"finished" design. A design that fails that much of its own traffic is not finished.\n` +
+        `Measured this attempt: p50=${stats.p50.toFixed(1)}ms p95=${stats.p95.toFixed(1)}ms p99=${stats.p99.toFixed(1)}ms ` +
+        `goodput=${stats.goodputRps.toFixed(1)}rps offered=${stats.offeredRps.toFixed(1)}rps errorRate=${(stats.errorRate * 100).toFixed(1)}%.\n` +
+        'Either raise capacity/instances on the bottleneck component(s) in THIS SAME step so the measured error ' +
+        'rate actually drops below the ceiling, or set isFinalStep=false and address the bottleneck as its own step.',
+    );
+  }
+
+  return { step, topology: result.topology, stats };
 }
 
 /**
@@ -218,16 +264,20 @@ async function attemptStep(
  */
 export async function planNextStep(
   ctx: PlanContext,
-  deps: { generate?: StepGenerator; provider?: ProviderId } = {},
+  deps: { generate?: StepGenerator; provider?: ProviderId; seed?: number; simulatedSeconds?: number } = {},
 ): Promise<PlannedStep> {
   const generate = deps.generate ?? (deps.provider ? createProviderGenerator(deps.provider) : defaultGenerate);
+  const simOpts = {
+    seed: deps.seed ?? DEFAULT_SEED,
+    simulatedSeconds: deps.simulatedSeconds ?? DEFAULT_SIMULATED_SECONDS,
+  };
   let feedback: string | undefined;
   let lastError: StepAttemptError | undefined;
   const retryReasons: string[] = [];
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const result = await attemptStep(ctx, feedback, generate);
+      const result = await attemptStep(ctx, feedback, generate, simOpts);
       return { ...result, attempts: attempt, retryReasons };
     } catch (err) {
       if (!(err instanceof StepAttemptError)) throw err;
