@@ -305,12 +305,23 @@ real browser (Playwright's mouse API, not a mocked drag) to add nodes,
 move them, wire them, hit that exact cycle case, delete an edge, and run a
 real simulation -- five tests, none of them scripting around the UI.
 
-Node deletion is deliberately NOT supported. `StepDiff` only has
-`addNodes`/`addEdges`/`removeEdges` -- no `removeNodes` -- matching this
-whole project's add-one-thing-at-a-time philosophy on the LLM-driven side
-too. "Clear canvas" (reset to empty) is the escape hatch for a first pass,
-rather than half-building node removal, which would also have to decide
-what happens to that node's edges.
+Node deletion IS supported, via a `removeNodes` field added to `StepDiff`
+-- but deliberately NOT exposed to either LLM-driven path (neither the
+Gemini/DeepSeek system prompt nor the MCP schema mentions it). That's not
+an oversight: this project's tutor teaches by adding one real idea at a
+time and never un-teaches a component, and letting a model delete
+something it already taught would undermine that premise. A human
+free-building on the canvas has the opposite problem -- everyone
+misclicks -- so it's the one caller that sets this field.
+
+Deleting a node cascades: any edge touching it is removed too
+(independent of `removeEdges`), computed in the same pass inside
+`applyStep`, since a dangling edge would fail `isTopology` outright if it
+weren't. Proven in `e2e/tests/build-canvas.spec.ts`: deleting the middle
+node of a real client -> service -> db chain removes both edges touching
+it, leaves the client and db nodes (and nothing else) standing, and the
+two survivors remain a valid, simulatable topology afterward -- not just
+"the deleted node disappeared," which would miss a dangling-edge bug.
 
 ## Deliberately deferred, not forgotten
 

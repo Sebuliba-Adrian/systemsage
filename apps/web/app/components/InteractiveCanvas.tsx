@@ -21,11 +21,11 @@ import {
  * trip: the engine package is pure computation with no Node-only imports,
  * so it runs directly in the browser.
  *
- * Node deletion is deliberately NOT supported: applyStep's StepDiff has no
- * removeNodes, only removeEdges, matching this whole project's
- * add-one-thing-at-a-time philosophy. "Clear canvas" is the escape hatch
- * for starting over, rather than half-building node removal (which would
- * also need to decide what happens to that node's edges) for a first pass.
+ * Node deletion IS supported here (applyStep's removeNodes, cascading its
+ * edges) even though the LLM-driven and MCP paths deliberately never use
+ * it -- their tutor teaches by adding one thing at a time and never
+ * un-teaches a component; a human free-building has every reason to fix a
+ * mistake by deleting it.
  */
 
 const NODE_WIDTH = 140;
@@ -110,6 +110,19 @@ export function InteractiveCanvas() {
     setError(null);
     setStats(null);
     setTopology(result.topology);
+  }
+
+  function commitRemoveNode(id: string) {
+    const result = applyStep(topology, { addNodes: [], addEdges: [], removeEdges: [], removeNodes: [id] });
+    if (!result.ok) {
+      setError(result.errors.join(' '));
+      return;
+    }
+    setError(null);
+    setStats(null);
+    setTopology(result.topology);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
   }
 
   function commitRemoveEdge(id: string) {
@@ -370,7 +383,7 @@ export function InteractiveCanvas() {
         </svg>
 
         {selectedNode && (
-          <div data-testid="node-inspector" style={{ marginTop: 12, fontSize: 13 }}>
+          <div data-testid="node-inspector" style={{ marginTop: 12, fontSize: 13, display: 'flex', gap: 12, alignItems: 'center' }}>
             <label>
               Label:{' '}
               <input
@@ -380,6 +393,13 @@ export function InteractiveCanvas() {
                 style={{ background: '#1b2436', color: '#e6e9f0', border: '1px solid #2c3550', borderRadius: 6, padding: '4px 8px' }}
               />
             </label>
+            <button
+              data-testid="delete-node-button"
+              onClick={() => commitRemoveNode(selectedNode.id)}
+              style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid #5c2c2c', background: 'transparent', color: '#ff6b6b', cursor: 'pointer' }}
+            >
+              Delete node
+            </button>
           </div>
         )}
 

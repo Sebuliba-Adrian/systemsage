@@ -177,6 +177,62 @@ test('selecting an edge and deleting it removes exactly that edge', async ({ pag
   await expect(page.locator('[data-testid^="edge-"]')).toHaveCount(0);
 });
 
+test('deleting a node also cascades its edges, but leaves unrelated nodes and edges intact', async ({ page }) => {
+  await page.goto('/build');
+
+  const canvas = page.getByTestId('build-canvas');
+  const canvasBox = (await canvas.boundingBox())!;
+
+  // client-1 -> service-1 -> db-1. Deleting service-1 should take BOTH
+  // edges with it (cascade), but client-1 and db-1 must survive untouched.
+  for (const [kind, pos] of [
+    ['client', { x: canvasBox.x + 80, y: canvasBox.y + 60 }],
+    ['service', { x: canvasBox.x + 320, y: canvasBox.y + 60 }],
+    ['db', { x: canvasBox.x + 560, y: canvasBox.y + 60 }],
+  ] as const) {
+    const palette = page.getByTestId(`palette-item-${kind}`);
+    const paletteBox = (await palette.boundingBox())!;
+    await dragFromTo(page, { x: paletteBox.x + 10, y: paletteBox.y + 10 }, pos);
+  }
+
+  async function wire(fromId: string, toId: string) {
+    const connector = page.getByTestId(`connector-${fromId}`);
+    const connectorBox = (await connector.boundingBox())!;
+    const target = page.getByTestId(`node-${toId}`);
+    const targetBox = (await target.boundingBox())!;
+    await dragFromTo(
+      page,
+      { x: connectorBox.x + connectorBox.width / 2, y: connectorBox.y + connectorBox.height / 2 },
+      { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 },
+    );
+  }
+
+  await wire('client-1', 'service-1');
+  await wire('service-1', 'db-1');
+  await expect(page.locator('[data-testid^="edge-"]')).toHaveCount(2);
+
+  // Select service-1 (click its body, away from the connector handle) and
+  // delete it via the inspector.
+  const serviceBox = (await page.getByTestId('node-service-1').boundingBox())!;
+  await page.mouse.click(serviceBox.x + 20, serviceBox.y + 20);
+  await expect(page.getByTestId('node-inspector')).toBeVisible();
+  await page.getByTestId('delete-node-button').click();
+
+  await expect(canvas.locator('[data-testid^="node-"]')).toHaveCount(2);
+  await expect(page.getByTestId('node-service-1')).toHaveCount(0);
+  await expect(page.getByTestId('node-client-1')).toBeVisible();
+  await expect(page.getByTestId('node-db-1')).toBeVisible();
+  // Both edges touched service-1, so both must be gone -- not just the one
+  // that happened to be selected.
+  await expect(page.locator('[data-testid^="edge-"]')).toHaveCount(0);
+  await expect(page.getByTestId('build-error')).toHaveCount(0);
+
+  // The two survivors must still be a valid, simulatable topology.
+  await page.getByTestId('run-simulation-button').click();
+  const p50 = Number.parseFloat(await page.getByTestId('stat-p50').innerText());
+  expect(Number.isFinite(p50)).toBe(true);
+});
+
 test('clear canvas resets to the empty state', async ({ page }) => {
   await page.goto('/build');
 

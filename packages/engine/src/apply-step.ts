@@ -45,6 +45,17 @@ export interface StepDiff {
   addNodes: StepNode[];
   addEdges: StepEdge[];
   removeEdges: StepEdge[];
+  /**
+   * Node ids to delete, cascading: any edge touching a removed node is
+   * removed too (independent of removeEdges), since a dangling edge would
+   * fail isTopology outright. Optional and deliberately NOT exposed to
+   * either LLM-driven path (the Gemini/DeepSeek system prompt and the MCP
+   * schema never mention it) -- this project's tutor teaches by adding one
+   * thing at a time and never un-teaches a component. A human free-building
+   * on the interactive canvas has every reason to fix a mistake by deleting
+   * it, which is the one caller that sets this.
+   */
+  removeNodes?: string[];
 }
 
 export type ApplyStepResult = { ok: true; topology: Topology } | { ok: false; errors: string[] };
@@ -70,6 +81,7 @@ function toSimEdge(e: StepEdge, index: number): SimEdge {
 
 export function applyStep(current: Topology, diff: StepDiff): ApplyStepResult {
   const errors: string[] = [];
+  const removeNodeIds = new Set(diff.removeNodes ?? []);
 
   const existingIds = new Set(current.nodes.map((n) => n.id));
   for (const n of diff.addNodes) {
@@ -77,6 +89,14 @@ export function applyStep(current: Topology, diff: StepDiff): ApplyStepResult {
       errors.push(
         `Reused an existing node id: "${n.id}". Every id in addNodes must be new. ` +
           `Existing ids: ${[...existingIds].join(', ')}.`,
+      );
+    }
+  }
+
+  for (const id of removeNodeIds) {
+    if (!existingIds.has(id)) {
+      errors.push(
+        `Tried to remove a nonexistent node: "${id}". Existing ids: ${[...existingIds].join(', ')}.`,
       );
     }
   }
@@ -94,11 +114,15 @@ export function applyStep(current: Topology, diff: StepDiff): ApplyStepResult {
 
   if (errors.length > 0) return { ok: false, errors };
 
+  const survivingNodes = current.nodes.filter((n) => !removeNodeIds.has(n.id));
   const survivingEdges = current.edges.filter(
-    (e) => !diff.removeEdges.some((r) => r.from === e.from && r.to === e.to),
+    (e) =>
+      !diff.removeEdges.some((r) => r.from === e.from && r.to === e.to) &&
+      !removeNodeIds.has(e.from) &&
+      !removeNodeIds.has(e.to),
   );
 
-  const nodes = [...current.nodes, ...diff.addNodes.map(toSimNode)];
+  const nodes = [...survivingNodes, ...diff.addNodes.map(toSimNode)];
   const edges = [...survivingEdges, ...diff.addEdges.map((e, i) => toSimEdge(e, survivingEdges.length + i))];
 
   try {
