@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { SimEdge, SimNode, SystemStats } from '@systemsage/engine';
 import { Canvas } from './components/Canvas';
 import { readSse } from './lib/readSse';
@@ -76,6 +77,11 @@ export default function Page() {
       <h1>SystemSage</h1>
       <p style={{ color: '#8b96b3' }}>
         Describe a system. Watch it get built, one real measured step at a time.
+      </p>
+      <p style={{ marginTop: -8, marginBottom: 24 }}>
+        <Link href="/build" data-testid="build-link" style={{ color: '#7ee787', fontSize: 13 }}>
+          Or build it yourself &rarr;
+        </Link>
       </p>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 12, marginBottom: 32 }}>

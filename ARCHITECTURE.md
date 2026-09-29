@@ -274,6 +274,44 @@ between the check and the call; the `finally` block's `controller.close()`
 is wrapped the same way. Confirmed fixed by re-running the full e2e suite
 after the fix landed: zero recurrences.
 
+## A fourth driver: a human, dragging components by hand
+
+`apps/web/app/build` (`InteractiveCanvas.tsx`) is a real interactive
+palette-and-canvas editor, not a mock-up: drag a component from the
+palette onto the canvas, drag from its connector handle to another
+component to wire them, then run the simulation. It is a fourth caller of
+the same shared core the hosted Gemini/DeepSeek planner and the MCP server
+already use -- `applyStep` and `simulate`, unmodified -- so a design built
+by hand is held to the identical standard as one an LLM proposed. No API
+route needed: the engine package has no Node-only dependencies, so it runs
+directly in the browser.
+
+One real extension was needed to make this work: `StepNode` gained
+optional `x`/`y` fields. The LLM-driven path never sets them (so its
+behavior is unchanged -- `toSimNode` still defaults to `NaN`, letting
+`assignLayout`'s BFS auto-place every node), but a human dropping a
+component at a specific point on the canvas has a real position to give
+it, and `assignLayout` already skipped positioning any node with finite
+x/y (that's the same mechanism the Step 2 "cache hides the db" fix relies
+on) -- so this was a two-line change, not a fork of the layout logic.
+
+A genuinely nice consequence of reusing `applyStep` unmodified: wiring a
+real cycle by hand (A -> B -> C -> A) hits the exact same `GraphCycleError`
+path the concurrent-stress-test fix built (see above) -- a human's mistake
+is caught by the identical check as a model's, not a separate one that
+could drift out of sync with it. Proven in
+`e2e/tests/build-canvas.spec.ts`, which drives real pointer events in a
+real browser (Playwright's mouse API, not a mocked drag) to add nodes,
+move them, wire them, hit that exact cycle case, delete an edge, and run a
+real simulation -- five tests, none of them scripting around the UI.
+
+Node deletion is deliberately NOT supported. `StepDiff` only has
+`addNodes`/`addEdges`/`removeEdges` -- no `removeNodes` -- matching this
+whole project's add-one-thing-at-a-time philosophy on the LLM-driven side
+too. "Clear canvas" (reset to empty) is the escape hatch for a first pass,
+rather than half-building node removal, which would also have to decide
+what happens to that node's edges.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is

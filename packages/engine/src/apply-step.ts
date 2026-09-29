@@ -24,6 +24,16 @@ export interface StepNode {
   kind: NodeKind;
   label: string;
   config?: Partial<NodeConfig>;
+  /**
+   * Explicit placement -- e.g. where a human dropped it on the interactive
+   * canvas (apps/web/app/components/InteractiveCanvas.tsx). Omitted (the
+   * LLM-driven path never sets this) leaves the node unpositioned so
+   * assignLayout auto-places it by BFS depth, exactly as before. A human
+   * placing a node by hand is the only caller with a real position to give
+   * it, so this is the one thing that path skips assignLayout for.
+   */
+  x?: number;
+  y?: number;
 }
 
 export interface StepEdge {
@@ -45,10 +55,11 @@ function toSimNode(n: StepNode): SimNode {
     id: n.id,
     kind: n.kind,
     label: n.label,
-    // Real values come from assignLayout below; NaN is an explicit,
-    // detectable "not yet positioned" placeholder, never a silent 0,0.
-    x: NaN,
-    y: NaN,
+    // Real values come from assignLayout below when not given explicitly;
+    // NaN is an explicit, detectable "not yet positioned" placeholder,
+    // never a silent 0,0.
+    x: n.x ?? NaN,
+    y: n.y ?? NaN,
     config: { ...base, ...n.config },
   };
 }
