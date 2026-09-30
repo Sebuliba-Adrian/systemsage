@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import type { SimEdge, SimNode, SystemStats } from '@systemsage/engine';
+import type { RequestTrace, SimEdge, SimNode, SystemStats } from '@systemsage/engine';
 import { Canvas } from './components/Canvas';
+import { TraceView } from './components/TraceView';
 import { readSse } from './lib/readSse';
 
 interface StepEvent {
@@ -12,6 +13,7 @@ interface StepEvent {
   narration: string;
   topology: { nodes: SimNode[]; edges: SimEdge[] };
   stats: SystemStats;
+  trace: RequestTrace | null;
   seed: number;
   isFinalStep: boolean;
   attempts: number;
@@ -335,6 +337,7 @@ export default function Page() {
               <dt>failed</dt>
               <dd data-testid="stat-total-failed">{step.stats.totalFailed.toLocaleString()}</dd>
             </dl>
+            <TraceView trace={step.trace} nodes={step.topology.nodes} />
           </section>
         ))}
       </div>

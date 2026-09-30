@@ -6,10 +6,12 @@ import {
   simulate,
   NODE_KINDS,
   type NodeKind,
+  type RequestTrace,
   type SimNode,
   type SystemStats,
   type Topology,
 } from '@systemsage/engine';
+import { TraceView } from './TraceView';
 
 /*
  * A fourth driver of the same shared core the LLM-hosted planner and the
@@ -52,6 +54,7 @@ export function InteractiveCanvas() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
+  const [trace, setTrace] = useState<RequestTrace | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const counters = useRef<Record<string, number>>({});
@@ -90,6 +93,7 @@ export function InteractiveCanvas() {
     }
     setError(null);
     setStats(null);
+    setTrace(null);
     setTopology(result.topology);
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
@@ -109,6 +113,7 @@ export function InteractiveCanvas() {
     }
     setError(null);
     setStats(null);
+    setTrace(null);
     setTopology(result.topology);
   }
 
@@ -120,6 +125,7 @@ export function InteractiveCanvas() {
     }
     setError(null);
     setStats(null);
+    setTrace(null);
     setTopology(result.topology);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
@@ -139,6 +145,7 @@ export function InteractiveCanvas() {
     }
     setError(null);
     setStats(null);
+    setTrace(null);
     setTopology(result.topology);
     setSelectedEdgeId(null);
   }
@@ -156,12 +163,15 @@ export function InteractiveCanvas() {
 
   function runSimulation() {
     if (topology.nodes.length === 0) return;
-    setStats(simulate(topology, { seed: 1, simulatedSeconds: 30 }).stats);
+    const result = simulate(topology, { seed: 1, simulatedSeconds: 30 });
+    setStats(result.stats);
+    setTrace(result.trace);
   }
 
   function clearCanvas() {
     setTopology(EMPTY_TOPOLOGY);
     setStats(null);
+    setTrace(null);
     setError(null);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
@@ -415,6 +425,8 @@ export function InteractiveCanvas() {
             <dd data-testid="stat-error-rate">{(stats.errorRate * 100).toFixed(2)}%</dd>
           </dl>
         )}
+
+        {stats && <TraceView trace={trace} nodes={topology.nodes} />}
       </div>
     </div>
   );

@@ -593,6 +593,62 @@ browser click on a step's "▶" button drives the `<audio>` element's
 `paused` property to `false` with a real `blob:` URL; and the "Narrate
 automatically" checkbox does the same without any click at all.
 
+## The per-request trace: queued vs. served, finally surfaced
+
+Asked directly: what real capability does the vendored Breakscale engine
+have that SystemSage built on top of but never actually exposed?
+`packages/engine/src/sim/engine.ts`'s `snapshot()` already returns a
+`SimSnapshot` with `nodes` (per-component stats), `history` (a real
+time series), `failuresByReason`, fault-injection primitives
+(`injectFailure`/`isEdgeCut`), and a `trace: RequestTrace | null` -- one
+real completed-or-terminated request, hop by hop. `simulate()`
+(`packages/engine/src/index.ts`) only ever read `.system` off that
+snapshot and threw the rest away. The trace was the first one wired in,
+chosen because it answers something no aggregate percentile can: *is this
+slow because of queueing, or because the work itself is slow?*
+`TraceHop.queuedMs` (waiting for a free slot) and `.serviceMs` (the work,
+once a slot was held) are kept apart specifically so they can move
+independently -- a hop that's mostly queuedMs is a capacity problem: add
+instances. A hop that's mostly serviceMs is a genuinely slow component:
+different fix entirely. No aggregate p99 can tell those apart; the trace
+always can.
+
+`SimulationResult` now carries `trace` alongside `stats`, threaded through
+exactly the same path `stats` already takes (`plan.ts`'s `PlannedStep`,
+`runner.ts`'s `step` SSE event) so the LLM-hosted tutor, `/continue`, and
+the interactive canvas's own direct `simulate()` call all get it for
+free. A shared `TraceView` component (used by both `page.tsx` and
+`InteractiveCanvas.tsx` -- the same DRY discipline `Canvas` itself
+already follows) renders each hop as a two-segment bar, amber for queued
+and blue for served, scaled relative to the worst hop on the traced
+request's path.
+
+Confirmed live and via a real test, not assumed: a real overloaded
+session's trace showed the `URL Service` hop dominated by queued time
+(198.4ms queued vs. 27.6ms served) with the `Database` hop correctly
+showing 0ms/0ms -- the traced request was shed at the service and never
+reached the database at all, which is the real, correct diagnosis, not a
+test bug (an earlier version of the test wrongly assumed the database
+would always be the bottleneck; the real trace corrected that assumption
+before the test was fixed to match reality). `e2e/tests/trace.spec.ts`
+proves both directions with the identical topology shape: heavy queueing
+at the real bottleneck when undersized, and near-zero queueing everywhere
+once actually sized to survive the load -- the negative case that proves
+the trace isn't just always showing delay.
+
+Left dormant for now, deliberately, not forgotten, from the same
+investigation: per-node stats (`SimSnapshot.nodes`) and the `history`
+time series -- both would show which specific component is the
+bottleneck and how the run evolved over time, not just the endpoint;
+fault injection (`injectFailure`/`isEdgeCut`) -- real chaos engineering,
+letting a scrutiny question like "what if the database goes down?" run an
+actual simulated crash instead of LLM reasoning; the 4 hand-authored
+Challenges (`challenges.ts`) -- fully engine-verified practice scenarios
+with staged hints and a pass/fail evaluator, a distinct mode from
+free-form tutoring; and the 23-preset library (`presets.ts`), currently
+mined only for per-kind config defaults. Each is a real, separate
+decision about scope, not an oversight.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is

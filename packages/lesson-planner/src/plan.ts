@@ -1,5 +1,5 @@
 import { generateObject, NoObjectGeneratedError } from 'ai';
-import { applyStep, buildDesignFormatGuide, simulate, type SystemStats, type Topology } from '@systemsage/engine';
+import { applyStep, buildDesignFormatGuide, simulate, type RequestTrace, type SystemStats, type Topology } from '@systemsage/engine';
 import { LessonStepSchema, type LessonStep } from './schema';
 import { createModel, type ProviderId } from './providers';
 import type { QaEntry } from './ask';
@@ -97,6 +97,13 @@ export interface PlannedStep {
    * checked).
    */
   stats: SystemStats;
+  /**
+   * One real completed request from this same simulate() call, hop by hop
+   * -- or null if none completed. See @systemsage/engine's SimulationResult
+   * doc comment: this is what distinguishes "waiting in line" from "the
+   * work itself is slow," which no aggregate percentile can.
+   */
+  trace: RequestTrace | null;
   /** How many tries this step took. 1 means it succeeded first try -- no retry needed. */
   attempts: number;
   /** One entry per FAILED attempt (so length is attempts-1), the real reason each one was rejected. */
@@ -207,6 +214,7 @@ interface StepAttemptResult {
   step: LessonStep;
   topology: Topology;
   stats: SystemStats;
+  trace: RequestTrace | null;
 }
 
 async function attemptStep(
@@ -247,7 +255,8 @@ async function attemptStep(
     );
   }
 
-  const stats = simulate(result.topology, simOpts).stats;
+  const simResult = simulate(result.topology, simOpts);
+  const stats = simResult.stats;
 
   // The check a system prompt can only ask for, never enforce: a real
   // live session proved a model will set isFinalStep=true at a 99%+
@@ -267,7 +276,7 @@ async function attemptStep(
     );
   }
 
-  return { step, topology: result.topology, stats };
+  return { step, topology: result.topology, stats, trace: simResult.trace };
 }
 
 /**

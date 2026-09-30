@@ -7,10 +7,10 @@
  * a lesson step can call instead of talking to the Engine class directly.
  */
 import { Engine } from './sim/engine';
-import type { SystemStats, Topology } from './sim/types';
+import type { RequestTrace, SystemStats, Topology } from './sim/types';
 
 export { NODE_KINDS, isTopology } from './topology-schema';
-export type { NodeConfig, NodeKind, SimEdge, SimNode, SystemStats, Topology } from './sim/types';
+export type { NodeConfig, NodeKind, SimEdge, SimNode, SystemStats, Topology, RequestTrace, TraceHop } from './sim/types';
 export { defaultConfig } from './sim/presets';
 export { assignLayout, GraphCycleError } from './layout';
 export { applyStep, type ApplyStepResult, type StepDiff, type StepEdge, type StepNode } from './apply-step';
@@ -19,6 +19,16 @@ export { buildDesignFormatGuide, buildPaletteReference } from './design-format-g
 export interface SimulationResult {
   /** Aggregate stats at the end of the run -- the numbers a step narrates. */
   stats: SystemStats;
+  /**
+   * One real request, hop by hop, sampled at the end of the run -- or null
+   * if none completed. Every number in `stats` is an aggregate (a rate, a
+   * percentile, a mean); those say latency ROSE without saying where it
+   * went. This is the one place that answers it: a single traced request's
+   * `queuedMs` vs `serviceMs` per hop distinguishes "waiting in line" from
+   * "the work itself is slow," which no percentile can. Computed by the
+   * engine on every run already -- this was previously discarded.
+   */
+  trace: RequestTrace | null;
   /** Seed used, so a caller can prove a re-run reproduces the same numbers. */
   seed: number;
   simulatedSeconds: number;
@@ -45,8 +55,10 @@ export function simulate(
     engine.advance(stepMs);
   }
 
+  const snapshot = engine.snapshot();
   return {
-    stats: engine.snapshot().system,
+    stats: snapshot.system,
+    trace: snapshot.trace,
     seed,
     simulatedSeconds,
   };

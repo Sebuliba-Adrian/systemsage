@@ -73,6 +73,7 @@ export async function advanceSession(session: SessionState, opts: AdvanceOpts): 
       narration: planned.step.narration,
       topology: session.topology,
       stats: planned.stats,
+      trace: planned.trace,
       seed: opts.seed,
       isFinalStep: planned.step.isFinalStep,
       attempts: planned.attempts,
