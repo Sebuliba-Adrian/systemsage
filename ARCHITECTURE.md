@@ -637,17 +637,63 @@ once actually sized to survive the load -- the negative case that proves
 the trace isn't just always showing delay.
 
 Left dormant for now, deliberately, not forgotten, from the same
-investigation: per-node stats (`SimSnapshot.nodes`) and the `history`
-time series -- both would show which specific component is the
-bottleneck and how the run evolved over time, not just the endpoint;
-fault injection (`injectFailure`/`isEdgeCut`) -- real chaos engineering,
-letting a scrutiny question like "what if the database goes down?" run an
-actual simulated crash instead of LLM reasoning; the 4 hand-authored
-Challenges (`challenges.ts`) -- fully engine-verified practice scenarios
-with staged hints and a pass/fail evaluator, a distinct mode from
-free-form tutoring; and the 23-preset library (`presets.ts`), currently
-mined only for per-kind config defaults. Each is a real, separate
-decision about scope, not an oversight.
+investigation: the `history` time series -- would show how the run
+evolved over time, not just the endpoint (per-node stats, the other Tier
+1 finding, are wired in now -- see below); fault injection
+(`injectFailure`/`isEdgeCut`) -- real chaos engineering, letting a
+scrutiny question like "what if the database goes down?" run an actual
+simulated crash instead of LLM reasoning; the 4 hand-authored Challenges
+(`challenges.ts`) -- fully engine-verified practice scenarios with staged
+hints and a pass/fail evaluator, a distinct mode from free-form tutoring;
+and the 23-preset library (`presets.ts`), currently mined only for
+per-kind config defaults. Each is a real, separate decision about scope,
+not an oversight.
+
+## Per-node stats: which specific component is the bottleneck, and why
+
+The trace above answers "queueing or slow work" for ONE sampled request.
+`SimSnapshot.nodes: Record<string, NodeStats>` is the complementary,
+AGGREGATE picture across every request that touched each component this
+run: utilization, p50/p95/p99, errorRate, shedRate, timeoutRate,
+throughput -- all specific to that one node. `stats` on a step is one
+number for the WHOLE topology; this is what answers "which specific
+component is the bottleneck, and is it shedding, timing out, or erroring"
+instead of one flat error rate standing in for everything behind it.
+
+Wired through the identical path `trace` already takes
+(`SimulationResult` -> `PlannedStep` -> the step SSE event), so every
+driver gets it for free. Surfaced two ways, not one: `Canvas.tsx` colors
+each node's border by its own utilization (blue under 60%, amber 60-90%,
+red at 90%+) so the bottleneck is visible on the diagram itself, and a
+shared `NodeStatsTable` (used by both `page.tsx` and
+`InteractiveCanvas.tsx`) gives the precise numbers underneath. The same
+color thresholds are shared by both (`Canvas.tsx`, `InteractiveCanvas.tsx`,
+`NodeStatsTable.tsx` each define the identical function) -- worth
+factoring into one shared helper if a fourth place ever needs it, not
+done yet since three near-identical six-line functions is not worse than
+a shared module for something this small.
+
+Confirmed live: a real overloaded step showed BOTH `URL Service` and
+`Database` at 100% utilization with real red borders on the diagram --
+1730 shed/s and 138.9 shed/s respectively -- a more complete picture than
+the single trace sample alone caught (which only showed the request
+failing at the service, not that the database behind it was equally
+saturated). The two features are genuinely complementary: one real
+example vs. the aggregate truth across the whole run.
+
+`e2e/tests/node-stats.spec.ts` proves both directions on the same
+topology shape used for the trace tests: an undersized component reports
+real utilization above 90% with real shed/timeout counts; the identical
+component actually sized to survive the load reports utilization under
+50% with zero drops -- the negative case, so a component isn't just
+always red. One test-writing note worth keeping: a naive
+`[data-testid^="node-"]` selector an EARLIER test already relied on to
+count topology nodes collided with the new `node-stats-table`/
+`node-utilization-border-*` testids the moment they existed (the exact
+same class of bug the `node-inspector` collision was, on a different
+project). Fixed by renaming the new ones (`per-node-stats-table`,
+`utilization-border-*`) rather than touching the established convention
+every other test already depends on.
 
 ## Deliberately deferred, not forgotten
 

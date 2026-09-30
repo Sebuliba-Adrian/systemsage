@@ -7,10 +7,10 @@
  * a lesson step can call instead of talking to the Engine class directly.
  */
 import { Engine } from './sim/engine';
-import type { RequestTrace, SystemStats, Topology } from './sim/types';
+import type { NodeStats, RequestTrace, SystemStats, Topology } from './sim/types';
 
 export { NODE_KINDS, isTopology } from './topology-schema';
-export type { NodeConfig, NodeKind, SimEdge, SimNode, SystemStats, Topology, RequestTrace, TraceHop } from './sim/types';
+export type { NodeConfig, NodeKind, SimEdge, SimNode, SystemStats, Topology, RequestTrace, TraceHop, NodeStats } from './sim/types';
 export { defaultConfig } from './sim/presets';
 export { assignLayout, GraphCycleError } from './layout';
 export { applyStep, type ApplyStepResult, type StepDiff, type StepEdge, type StepNode } from './apply-step';
@@ -29,6 +29,16 @@ export interface SimulationResult {
    * engine on every run already -- this was previously discarded.
    */
   trace: RequestTrace | null;
+  /**
+   * Per-component stats, keyed by node id -- utilization, p50/p95/p99,
+   * errorRate, shedRate, timeoutRate, throughput, each specific to that
+   * ONE node. `stats` above is the whole-system aggregate; this is what
+   * answers "which specific component is the bottleneck, and is it
+   * shedding, timing out, or erroring" instead of one flat number for the
+   * entire topology. Computed by the engine on every run already -- this
+   * was previously discarded, same as `trace`.
+   */
+  nodeStats: Record<string, NodeStats>;
   /** Seed used, so a caller can prove a re-run reproduces the same numbers. */
   seed: number;
   simulatedSeconds: number;
@@ -59,6 +69,7 @@ export function simulate(
   return {
     stats: snapshot.system,
     trace: snapshot.trace,
+    nodeStats: snapshot.nodes,
     seed,
     simulatedSeconds,
   };

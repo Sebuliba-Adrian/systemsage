@@ -1,5 +1,5 @@
 import { generateObject, NoObjectGeneratedError } from 'ai';
-import { applyStep, buildDesignFormatGuide, simulate, type RequestTrace, type SystemStats, type Topology } from '@systemsage/engine';
+import { applyStep, buildDesignFormatGuide, simulate, type NodeStats, type RequestTrace, type SystemStats, type Topology } from '@systemsage/engine';
 import { LessonStepSchema, type LessonStep } from './schema';
 import { createModel, type ProviderId } from './providers';
 import type { QaEntry } from './ask';
@@ -104,6 +104,13 @@ export interface PlannedStep {
    * work itself is slow," which no aggregate percentile can.
    */
   trace: RequestTrace | null;
+  /**
+   * Per-component stats from this same simulate() call, keyed by node id.
+   * `stats` above is the whole-system aggregate; this is which specific
+   * component is the bottleneck, and whether it's shedding, timing out, or
+   * erroring.
+   */
+  nodeStats: Record<string, NodeStats>;
   /** How many tries this step took. 1 means it succeeded first try -- no retry needed. */
   attempts: number;
   /** One entry per FAILED attempt (so length is attempts-1), the real reason each one was rejected. */
@@ -215,6 +222,7 @@ interface StepAttemptResult {
   topology: Topology;
   stats: SystemStats;
   trace: RequestTrace | null;
+  nodeStats: Record<string, NodeStats>;
 }
 
 async function attemptStep(
@@ -276,7 +284,7 @@ async function attemptStep(
     );
   }
 
-  return { step, topology: result.topology, stats, trace: simResult.trace };
+  return { step, topology: result.topology, stats, trace: simResult.trace, nodeStats: simResult.nodeStats };
 }
 
 /**

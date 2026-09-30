@@ -6,12 +6,14 @@ import {
   simulate,
   NODE_KINDS,
   type NodeKind,
+  type NodeStats,
   type RequestTrace,
   type SimNode,
   type SystemStats,
   type Topology,
 } from '@systemsage/engine';
 import { TraceView } from './TraceView';
+import { NodeStatsTable } from './NodeStatsTable';
 
 /*
  * A fourth driver of the same shared core the LLM-hosted planner and the
@@ -41,6 +43,13 @@ function kindLabel(kind: string): string {
   return ACRONYMS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 }
 
+/** Same thresholds as Canvas.tsx and NodeStatsTable -- one visual language. */
+function utilizationColor(utilization: number): string {
+  if (utilization >= 0.9) return '#ff6b6b';
+  if (utilization >= 0.6) return '#f5a623';
+  return '#5b8cff';
+}
+
 type DragState =
   | { type: 'new-node'; kind: NodeKind }
   | { type: 'move-node'; id: string; offsetX: number; offsetY: number }
@@ -55,6 +64,7 @@ export function InteractiveCanvas() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [trace, setTrace] = useState<RequestTrace | null>(null);
+  const [nodeStats, setNodeStats] = useState<Record<string, NodeStats>>({});
   const [drag, setDrag] = useState<DragState | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const counters = useRef<Record<string, number>>({});
@@ -94,6 +104,7 @@ export function InteractiveCanvas() {
     setError(null);
     setStats(null);
     setTrace(null);
+    setNodeStats({});
     setTopology(result.topology);
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
@@ -114,6 +125,7 @@ export function InteractiveCanvas() {
     setError(null);
     setStats(null);
     setTrace(null);
+    setNodeStats({});
     setTopology(result.topology);
   }
 
@@ -126,6 +138,7 @@ export function InteractiveCanvas() {
     setError(null);
     setStats(null);
     setTrace(null);
+    setNodeStats({});
     setTopology(result.topology);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
@@ -146,6 +159,7 @@ export function InteractiveCanvas() {
     setError(null);
     setStats(null);
     setTrace(null);
+    setNodeStats({});
     setTopology(result.topology);
     setSelectedEdgeId(null);
   }
@@ -166,12 +180,14 @@ export function InteractiveCanvas() {
     const result = simulate(topology, { seed: 1, simulatedSeconds: 30 });
     setStats(result.stats);
     setTrace(result.trace);
+    setNodeStats(result.nodeStats);
   }
 
   function clearCanvas() {
     setTopology(EMPTY_TOPOLOGY);
     setStats(null);
     setTrace(null);
+    setNodeStats({});
     setError(null);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
@@ -370,8 +386,8 @@ export function InteractiveCanvas() {
                 height={NODE_HEIGHT}
                 rx={8}
                 fill="#1b2436"
-                stroke={n.id === selectedNodeId ? '#7ee787' : '#5b8cff'}
-                strokeWidth={n.id === selectedNodeId ? 2.5 : 1.5}
+                stroke={n.id === selectedNodeId ? '#7ee787' : utilizationColor(nodeStats[n.id]?.utilization ?? 0)}
+                strokeWidth={n.id === selectedNodeId || (nodeStats[n.id]?.utilization ?? 0) >= 0.6 ? 2.5 : 1.5}
               />
               <text x={n.x + NODE_WIDTH / 2} y={n.y + 24} textAnchor="middle" fontSize={13} fill="#e6e9f0">
                 {n.label}
@@ -427,6 +443,7 @@ export function InteractiveCanvas() {
         )}
 
         {stats && <TraceView trace={trace} nodes={topology.nodes} />}
+        {stats && <NodeStatsTable nodes={topology.nodes} nodeStats={nodeStats} />}
       </div>
     </div>
   );

@@ -74,6 +74,7 @@ export async function advanceSession(session: SessionState, opts: AdvanceOpts): 
       topology: session.topology,
       stats: planned.stats,
       trace: planned.trace,
+      nodeStats: planned.nodeStats,
       seed: opts.seed,
       isFinalStep: planned.step.isFinalStep,
       attempts: planned.attempts,

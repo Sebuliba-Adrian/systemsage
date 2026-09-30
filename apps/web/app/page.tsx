@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import type { RequestTrace, SimEdge, SimNode, SystemStats } from '@systemsage/engine';
+import type { NodeStats, RequestTrace, SimEdge, SimNode, SystemStats } from '@systemsage/engine';
 import { Canvas } from './components/Canvas';
 import { TraceView } from './components/TraceView';
+import { NodeStatsTable } from './components/NodeStatsTable';
 import { readSse } from './lib/readSse';
 
 interface StepEvent {
@@ -14,6 +15,7 @@ interface StepEvent {
   topology: { nodes: SimNode[]; edges: SimEdge[] };
   stats: SystemStats;
   trace: RequestTrace | null;
+  nodeStats: Record<string, NodeStats>;
   seed: number;
   isFinalStep: boolean;
   attempts: number;
@@ -318,7 +320,7 @@ export default function Page() {
               </div>
             )}
             <p data-testid="narration">{step.narration}</p>
-            <Canvas nodes={step.topology.nodes} edges={step.topology.edges} />
+            <Canvas nodes={step.topology.nodes} edges={step.topology.edges} nodeStats={step.nodeStats} />
             <dl data-testid="stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, auto)', gap: '4px 16px', marginTop: 12 }}>
               <dt>p50</dt>
               <dd data-testid="stat-p50">{step.stats.p50.toFixed(1)} ms</dd>
@@ -338,6 +340,7 @@ export default function Page() {
               <dd data-testid="stat-total-failed">{step.stats.totalFailed.toLocaleString()}</dd>
             </dl>
             <TraceView trace={step.trace} nodes={step.topology.nodes} />
+            <NodeStatsTable nodes={step.topology.nodes} nodeStats={step.nodeStats} />
           </section>
         ))}
       </div>
