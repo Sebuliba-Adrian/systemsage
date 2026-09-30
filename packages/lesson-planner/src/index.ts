@@ -1,4 +1,5 @@
 export { planNextStep, createProviderGenerator, StepExhaustedError, type PlanContext, type PlannedStep, type StepGenerator } from './plan';
+export { answerQuestion, createProviderAskGenerator, type AskContext, type AskGenerator, type QaEntry } from './ask';
 export { LessonStepSchema, type LessonStep } from './schema';
 export { buildPaletteReference } from './palette';
 export { assignLayout } from './layout';

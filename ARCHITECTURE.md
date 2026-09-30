@@ -507,6 +507,52 @@ exhausted case still assert `totalSteps === 1` (not `0`) specifically
 because that number is the proof continuation actually knew about the
 prior, already-banked step instead of quietly starting over.
 
+## Scrutiny: asking the candidate a real follow-up mid-pause
+
+Framed directly as an interview: at step 3, the interviewer often has
+follow-up questions before deciding to move on -- "what about the
+celebrity case?", "your error rate is 90%, what exactly is failing?" --
+and only continues once satisfied. `POST /api/design-session/ask` (`{
+sessionId, question }`) is that side channel, usable any time a session
+is genuinely `paused` (the same state step mode and a dropped connection
+both leave it in).
+
+Deliberately NOT another lesson step: no schema, no topology change, no
+retry budget, no `simulate()` call of its own -- `answerQuestion`
+(`packages/lesson-planner/src/ask.ts`) just asks the candidate to answer,
+grounded in the real topology and stats it already has, in the same voice
+as its step narrations. Plain JSON in, plain JSON out (unlike
+`route.ts`/`continue/route.ts`, this produces exactly one answer, not a
+sequence of events, so there's no reason to make it SSE).
+
+**The soft version, deliberately chosen over a hard gate.** Every
+question and its real answer is appended to the session's `qaLog` and
+handed to every LATER `planNextStep` call as context (see `plan.ts`'s
+`buildUserPrompt`) -- a real question actually shapes what gets built
+next. But nothing mechanically forces the next step to resolve a given
+question, and `isFinalStep` is never gated on one being answered. A hard
+"every question must be resolved" rule was considered and rejected: unlike
+a measured error rate (an objective number `simulate()` already computes,
+which is exactly why the `isFinalStep` gate above COULD be built in code),
+"was this question adequately addressed" has no mechanical check --
+forcing one risks brittle busywork instead of genuine scrutiny.
+
+Confirmed live, not just asserted: asked "your error rate is over 90%,
+what exactly is failing?" at a real paused step, the real answer cited the
+EXACT real config values in play -- `service-1` at capacity 8, `db-1` at
+capacity 6 with a 30ms service time and a queue limit of 32 -- and stated
+a concrete next move (scale both, add a cache or read replicas), not a
+generic non-answer. Proven six ways in
+`e2e/tests/ask.spec.ts`: a scripted-generator test confirms a real
+`qaLog` entry actually appears in the next step's prompt (and, just as
+important, that NO question section appears at all when `qaLog` is empty
+-- nothing invented); real-API tests confirm an unknown session 404s, a
+non-`paused` session is refused with 409 rather than answered against
+stale state, and a real question against a real paused session returns a
+real, non-trivial answer; a browser test confirms the same through the
+actual UI, and that asking does not consume the step or break
+continuation afterward.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is

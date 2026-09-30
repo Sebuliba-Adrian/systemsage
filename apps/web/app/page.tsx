@@ -28,6 +28,11 @@ interface SessionEvent {
   sessionId: string;
 }
 
+interface QaEntry {
+  question: string;
+  answer: string;
+}
+
 const PROVIDERS = [
   { id: 'gemini', label: 'Gemini' },
   { id: 'deepseek', label: 'DeepSeek' },
@@ -44,6 +49,9 @@ export default function Page() {
   const [doneInfo, setDoneInfo] = useState<DoneEvent | null>(null);
   const [status, setStatus] = useState<'idle' | 'running' | 'paused' | 'done' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [qaLog, setQaLog] = useState<QaEntry[]>([]);
+  const [question, setQuestion] = useState('');
+  const [asking, setAsking] = useState(false);
 
   // Shared by the initial POST and every /continue call: read the same SSE
   // event shapes, land in the same state. A step taken via "Continue" or
@@ -77,6 +85,7 @@ export default function Page() {
     setDoneInfo(null);
     setErrorMessage(null);
     setSessionId(null);
+    setQaLog([]);
     setStatus('running');
 
     try {
@@ -107,6 +116,32 @@ export default function Page() {
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setStatus('error');
+    }
+  }
+
+  async function handleAsk(e: React.FormEvent) {
+    e.preventDefault();
+    if (!sessionId || !question.trim() || asking) return;
+    setAsking(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch('/api/design-session/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, question }),
+      });
+      const data = (await response.json()) as { answer?: string; message?: string };
+      if (!response.ok) {
+        setErrorMessage(data.message ?? 'The question could not be answered.');
+      } else {
+        setQaLog((prev) => [...prev, { question, answer: data.answer ?? '' }]);
+        setQuestion('');
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAsking(false);
     }
   }
 
@@ -216,23 +251,61 @@ export default function Page() {
         ))}
       </div>
 
+      {qaLog.length > 0 && (
+        <div data-testid="qa-log" style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+          {qaLog.map((qa, i) => (
+            <div key={i} data-testid="qa-entry" style={{ border: '1px solid #2c3550', borderRadius: 8, padding: 12 }}>
+              <p style={{ margin: 0, color: '#7ee787', fontSize: 13 }} data-testid="qa-question">
+                Q: {qa.question}
+              </p>
+              <p style={{ margin: '6px 0 0', fontSize: 14 }} data-testid="qa-answer">
+                {qa.answer}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {status === 'paused' && (
-        <div data-testid="paused-controls" style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8 }}>
-          <span style={{ fontSize: 13, color: '#8b96b3' }}>Paused after step {steps.length}.</span>
-          <button
-            data-testid="continue-step-button"
-            onClick={() => handleContinue('step')}
-            style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: '#5b8cff', color: 'white', cursor: 'pointer' }}
-          >
-            Continue &rarr;
-          </button>
-          <button
-            data-testid="continue-auto-button"
-            onClick={() => handleContinue('auto')}
-            style={{ padding: '6px 16px', borderRadius: 8, border: '1px solid #2c3550', background: 'transparent', color: '#e6e9f0', cursor: 'pointer' }}
-          >
-            Finish automatically
-          </button>
+        <div data-testid="paused-controls" style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 13, color: '#8b96b3', marginBottom: 8 }}>Paused after step {steps.length}.</p>
+          <form onSubmit={handleAsk} style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+            <input
+              type="text"
+              data-testid="ask-question-input"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="Ask a follow-up about this step, e.g. what about the celebrity case?"
+              disabled={asking}
+              style={{ flex: 1, background: '#1b2436', color: '#e6e9f0', border: '1px solid #2c3550', borderRadius: 8, padding: 10 }}
+            />
+            <button
+              type="submit"
+              data-testid="ask-button"
+              disabled={asking || !question.trim()}
+              style={{ padding: '0 20px', borderRadius: 8, border: '1px solid #2c3550', background: 'transparent', color: '#e6e9f0', cursor: 'pointer' }}
+            >
+              {asking ? 'Asking…' : 'Ask'}
+            </button>
+          </form>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button
+              data-testid="continue-step-button"
+              onClick={() => handleContinue('step')}
+              disabled={asking}
+              style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: '#5b8cff', color: 'white', cursor: 'pointer' }}
+            >
+              Continue &rarr;
+            </button>
+            <button
+              data-testid="continue-auto-button"
+              onClick={() => handleContinue('auto')}
+              disabled={asking}
+              style={{ padding: '6px 16px', borderRadius: 8, border: '1px solid #2c3550', background: 'transparent', color: '#e6e9f0', cursor: 'pointer' }}
+            >
+              Finish automatically
+            </button>
+          </div>
         </div>
       )}
 

@@ -41,7 +41,12 @@ export async function advanceSession(session: SessionState, opts: AdvanceOpts): 
     let planned;
     try {
       planned = await planNextStep(
-        { description: session.description, priorSteps: session.priorSteps, currentTopology: session.topology },
+        {
+          description: session.description,
+          priorSteps: session.priorSteps,
+          currentTopology: session.topology,
+          qaLog: session.qaLog,
+        },
         {
           seed: opts.seed,
           simulatedSeconds: opts.simulatedSeconds,

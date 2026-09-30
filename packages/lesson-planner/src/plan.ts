@@ -2,6 +2,7 @@ import { generateObject, NoObjectGeneratedError } from 'ai';
 import { applyStep, buildDesignFormatGuide, simulate, type SystemStats, type Topology } from '@systemsage/engine';
 import { LessonStepSchema, type LessonStep } from './schema';
 import { createModel, type ProviderId } from './providers';
+import type { QaEntry } from './ask';
 
 const MAX_ATTEMPTS = 3;
 const DEFAULT_PROVIDER: ProviderId = 'gemini';
@@ -74,6 +75,15 @@ export interface PlanContext {
   description: string;
   priorSteps: LessonStep[];
   currentTopology: Topology;
+  /**
+   * Questions the interviewer asked (and got real answers to) at a pause
+   * during this session, oldest first. Handed back as context on every
+   * later step so a real question actually shapes what gets built next --
+   * the soft version of scrutiny: nothing forces the NEXT step to resolve
+   * a given question, and isFinalStep is never gated on one being
+   * answered. See ask.ts for why a hard gate was deliberately not built.
+   */
+  qaLog?: QaEntry[];
 }
 
 export interface PlannedStep {
@@ -166,6 +176,14 @@ function buildUserPrompt(ctx: PlanContext, feedback?: string): string {
         ctx.priorSteps.map((s) => s.stepTitle).join(' -> '),
     );
     lines.push(`Current topology: ${JSON.stringify(ctx.currentTopology)}`);
+  }
+  if (ctx.qaLog && ctx.qaLog.length > 0) {
+    lines.push(
+      'The interviewer paused and asked follow-up questions before this step -- take these into ' +
+        'account where relevant (you are not required to resolve every one immediately, but a ' +
+        'question you clearly ignore is a real gap):\n' +
+        ctx.qaLog.map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`).join('\n\n'),
+    );
   }
   if (feedback) {
     lines.push(

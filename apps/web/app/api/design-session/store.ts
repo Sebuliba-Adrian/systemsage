@@ -1,4 +1,4 @@
-import type { LessonStep, ProviderId } from '@systemsage/lesson-planner';
+import type { LessonStep, ProviderId, QaEntry } from '@systemsage/lesson-planner';
 import type { Topology } from '@systemsage/engine';
 
 /*
@@ -38,6 +38,15 @@ export interface SessionState {
   status: 'running' | 'paused' | 'done' | 'error';
   reason?: 'isFinalStep' | 'max_steps_reached' | 'step_exhausted';
   lastStepError?: string;
+  /**
+   * Follow-up questions asked (and answered) while paused, oldest first --
+   * the interview-scrutiny side channel. Persists for the WHOLE session
+   * (not reset per step) and is handed to planNextStep as context on every
+   * later step (see plan.ts), so a real question actually shapes what gets
+   * built next. See packages/lesson-planner/src/ask.ts for why this stays
+   * soft context rather than a hard gate on isFinalStep.
+   */
+  qaLog: QaEntry[];
   updatedAt: number;
 }
 
@@ -60,6 +69,7 @@ export function createSession(params: { description: string; provider?: Provider
     provider: params.provider,
     topology: { nodes: [], edges: [] },
     priorSteps: [],
+    qaLog: [],
     status: 'running',
     updatedAt: Date.now(),
   };
