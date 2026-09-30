@@ -1,38 +1,40 @@
-import { planNextStep, StepExhaustedError, type LessonStep, type ProviderId } from '@systemsage/lesson-planner';
-import type { Topology } from '@systemsage/engine';
+import type { ProviderId } from '@systemsage/lesson-planner';
+import { createSession } from './store';
+import { advanceSession } from './runner';
 
 /*
- * One design session, one SSE stream. See ARCHITECTURE.md: this contract
- * is written the way it is so a future mobile client is a new consumer of
- * it, not a reason to change it -- typed named events over one connection,
- * data (topology + stats JSON) rather than markup, exactly the shape
- * personal-assistant-mobile already proved works against a real backend
- * on a real device.
+ * One design session's ENTRY POINT: creates a new, persisted session (see
+ * store.ts) and starts advancing it over an SSE stream. See ARCHITECTURE.md:
+ * this contract is written the way it is so a future mobile client is a
+ * new consumer of it, not a reason to change it -- typed named events over
+ * one connection, data (topology + stats JSON) rather than markup, exactly
+ * the shape personal-assistant-mobile already proved works against a real
+ * backend on a real device.
  *
  * Events emitted, in order:
- *   step   { index, stepTitle, narration, topology, stats, seed, isFinalStep, attempts, retryReasons }
- *   done   { totalSteps, reason: 'isFinalStep' | 'max_steps_reached' | 'step_exhausted' }
- *   error  { message }
+ *   session { sessionId }                          -- always first
+ *   step    { index, stepTitle, narration, topology, stats, seed, isFinalStep, attempts, retryReasons }
+ *   paused  { sessionId, stepIndex }                -- stepMode only; POST /continue to advance
+ *   done    { totalSteps, reason: 'isFinalStep' | 'max_steps_reached' | 'step_exhausted' }
+ *   error   { message }
  *
- * `isFinalStep` and `reason` exist specifically so a real session's ending
- * is verifiable from the outside: without them, a session that always runs
- * out the step budget looks identical, from any client-visible data, to
- * one that genuinely finished the design -- a real gap found by trying to
- * confirm this externally and discovering there was no way to.
+ * `stepMode: true` in the request body takes exactly ONE step then emits
+ * `paused` and ends the response -- the client calls POST
+ * .../continue with { sessionId, mode: 'step' | 'auto' } to keep going,
+ * either one more step at a time or through to completion. This is the
+ * SAME mechanism a real dropped connection uses to recover: advanceSession
+ * (runner.ts) stops and marks the session 'paused' the instant nobody is
+ * listening, rather than either crashing or burning further real API
+ * calls into the void -- a deliberate pause (step mode) and an incidental
+ * one (a closed tab) are, at the protocol level, the same state.
  *
- * `attempts`/`retryReasons` exist for the same reason: without them, a
- * step that needed a real retry looks IDENTICAL to one that succeeded on
- * the first try. This is what makes a retry actually visible in the
- * browser, not just internally handled.
- *
- * `reason: 'step_exhausted'` is a real, observed failure mode, not a
- * hypothetical: a stress test against DeepSeek (whose JSON-schema output
- * mode is a compatibility shim, not native, and is measurably more
- * failure-prone) produced a real step that failed all 3 attempts in a
- * row. Ending the whole session in a raw `error` after several good steps
- * already shown would throw away real progress over one step's failure,
- * so that case degrades to `done` instead, keeping every step that
- * actually succeeded.
+ * `session`/`paused` exist specifically so a client can reconnect to a
+ * session that outlived its original connection -- without a durable,
+ * addressable session (see store.ts), a dropped connection meant losing
+ * all progress and starting over, the same real gap `isFinalStep`/`reason`
+ * were added to make externally verifiable in an earlier round: without
+ * them, there was no way to tell "genuinely finished" from "ran out of
+ * budget" either.
  */
 
 export const runtime = 'nodejs';
@@ -46,9 +48,10 @@ function sseFrame(event: string, data: unknown): string {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const body = (await req.json()) as { description?: string; provider?: ProviderId };
+  const body = (await req.json()) as { description?: string; provider?: ProviderId; stepMode?: boolean };
   const description = (body.description ?? '').trim();
   const provider = body.provider;
+  const stepMode = body.stepMode ?? false;
 
   if (!description) {
     return new Response(sseFrame('error', { message: 'description is required' }), {
@@ -56,6 +59,8 @@ export async function POST(req: Request): Promise<Response> {
       headers: { 'Content-Type': 'text/event-stream' },
     });
   }
+
+  const session = createSession({ description, provider });
 
   // Set by cancel() when the client disconnects mid-stream (tab closed, a
   // test finishing early, a network drop) -- a REAL condition found live
@@ -79,53 +84,17 @@ export async function POST(req: Request): Promise<Response> {
         }
       };
 
-      let topology: Topology = { nodes: [], edges: [] };
-      const priorSteps: LessonStep[] = [];
+      send('session', { sessionId: session.id });
 
-      let reason: 'isFinalStep' | 'max_steps_reached' | 'step_exhausted' = 'max_steps_reached';
       try {
-        for (let index = 0; index < MAX_STEPS; index++) {
-          let planned;
-          try {
-            planned = await planNextStep(
-              { description, priorSteps, currentTopology: topology },
-              { seed: SEED, simulatedSeconds: SIMULATED_SECONDS, ...(provider ? { provider } : {}) },
-            );
-          } catch (err) {
-            if (err instanceof StepExhaustedError) {
-              // A real, live failure mode (see the doc comment above): the
-              // model failed every attempt on this step. Keep every step
-              // that DID succeed and stop cleanly here, rather than
-              // throwing the whole session's real progress away. The
-              // outer finally still closes the controller exactly once.
-              reason = 'step_exhausted';
-              send('done', { totalSteps: priorSteps.length, reason, lastStepError: err.message });
-              return;
-            }
-            throw err;
-          }
-
-          topology = planned.topology;
-          priorSteps.push(planned.step);
-
-          send('step', {
-            index,
-            stepTitle: planned.step.stepTitle,
-            narration: planned.step.narration,
-            topology,
-            stats: planned.stats,
-            seed: SEED,
-            isFinalStep: planned.step.isFinalStep,
-            attempts: planned.attempts,
-            retryReasons: planned.retryReasons,
-          });
-
-          if (planned.step.isFinalStep) {
-            reason = 'isFinalStep';
-            break;
-          }
-        }
-        send('done', { totalSteps: priorSteps.length, reason });
+        await advanceSession(session, {
+          auto: !stepMode,
+          send,
+          isClientGone: () => clientGone,
+          maxSteps: MAX_STEPS,
+          seed: SEED,
+          simulatedSeconds: SIMULATED_SECONDS,
+        });
       } catch (err) {
         // Log the real stack trace server-side -- sending only err.message
         // to the client (necessary; a stack trace is not something to hand

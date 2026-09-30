@@ -440,6 +440,73 @@ something one run can distinguish -- it would take many repeated runs to
 see whether this is a pattern or ordinary sampling variance. Recorded
 here as an open question, not asserted as either.
 
+## Persisted, resumable sessions -- and step mode, on the same mechanism
+
+Asked directly: how does a design session handle a mid-session
+interruption (a dropped connection, a closed tab), and can it pick back up
+the way a real conversational tool does? Read honestly before building
+anything: it couldn't. The entire session -- `topology`, `priorSteps` --
+lived only in local variables inside one `ReadableStream.start()`
+closure, for the lifetime of one HTTP request. `clientGone` (added
+earlier, see the SSE-disconnect section above) stopped the server from
+*crashing* on a dropped connection, but the `for` loop never checked it,
+so a disconnect meant the server kept spending real, billed Gemini/
+DeepSeek calls into the void until the design finished -- and a
+reconnect was always a brand-new session starting from nothing. There was
+no session identity to reconnect TO.
+
+Fixed with one mechanism that serves two purposes at once:
+
+- **`store.ts`** -- a durable `SessionState` (`description`, `provider`,
+  `topology`, `priorSteps`, `status`), keyed by a generated id, held in a
+  module-level Map. Deliberately not a database: this app is one
+  long-running Node process (`next dev`/`next start`), not a serverless
+  deployment where each request could land on a different instance with
+  its own empty memory -- a real multi-instance deployment would need a
+  real store (Redis, etc.) instead, noted rather than silently assumed
+  away.
+- **`runner.ts`**'s `advanceSession` -- the one place a session is
+  actually advanced, shared by the initial POST and `/continue`, so
+  "start" and "resume" can never drift into two different ideas of what a
+  step is (the same DRY discipline `applyStep` already holds both design
+  drivers to). Its `auto` flag decides everything: `auto: true` keeps
+  going until the design finishes, runs out of retries, or nobody's
+  listening (`isClientGone()`) -- in which case it now PAUSES rather than
+  either crashing or burning further real API calls with no one watching.
+  `auto: false` takes exactly one step, then pauses on purpose.
+
+The key move: a deliberate pause (step mode's "Continue" button) and an
+incidental one (a real dropped connection) leave the session in the
+*exact same* `'paused'` state, resumed by the *exact same* call --
+`POST /api/design-session/continue` with `{ sessionId, mode }`. `mode:
+'step'` takes one more step and pauses again; `mode: 'auto'` is the
+"eventually continue with the original flow" escape hatch, switching a
+step-mode session back to running straight through to completion. This is
+also, at the protocol level, precisely what a genuine reconnect-after-
+disconnect does: the same endpoint, the same session, no special case.
+
+Proven two ways. A direct API-level suite
+(`e2e/tests/session-resume.spec.ts`) drives the actual routes with real
+Gemini calls and two independent HTTP requests -- proving a session
+survives past the request that created it: continuing produces step index
+1 (not a restart at 0), continuing an unknown id fails with a real 404 and
+a specific message rather than a crash, continuing an already-`done`
+session returns `done` immediately instead of erroring or quietly
+restarting, and `mode: 'auto'` genuinely runs a paused session through to
+a real completion. A browser-level suite (`e2e/tests/step-mode.spec.ts`)
+proves the same through the actual UI: the "Step through manually"
+checkbox, the "Paused after step N" banner, and both buttons.
+
+Both suites hit a real, honest wrinkle worth keeping rather than hiding:
+on some real runs, the SECOND step legitimately exhausts its retries (the
+isFinalStep error-rate gate, or schema validation) and the session ends
+in `step_exhausted` instead of producing a second step -- a live outcome,
+not a bug, already covered by earlier work. The tests accept EITHER
+legitimate outcome rather than assuming the happy path, and in the
+exhausted case still assert `totalSteps === 1` (not `0`) specifically
+because that number is the proof continuation actually knew about the
+prior, already-banked step instead of quietly starting over.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is

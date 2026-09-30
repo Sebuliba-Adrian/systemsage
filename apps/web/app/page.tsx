@@ -24,6 +24,10 @@ interface DoneEvent {
   lastStepError?: string;
 }
 
+interface SessionEvent {
+  sessionId: string;
+}
+
 const PROVIDERS = [
   { id: 'gemini', label: 'Gemini' },
   { id: 'deepseek', label: 'DeepSeek' },
@@ -34,38 +38,72 @@ export default function Page() {
     'A URL shortener that needs to handle 2000 requests per second',
   );
   const [provider, setProvider] = useState<'gemini' | 'deepseek'>('gemini');
+  const [stepMode, setStepMode] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [steps, setSteps] = useState<StepEvent[]>([]);
   const [doneInfo, setDoneInfo] = useState<DoneEvent | null>(null);
-  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'running' | 'paused' | 'done' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Shared by the initial POST and every /continue call: read the same SSE
+  // event shapes, land in the same state. A step taken via "Continue" or
+  // "Finish automatically" is otherwise indistinguishable from one taken
+  // by the original auto-run -- same events, same rendering, same stats.
+  async function consumeStream(response: Response) {
+    await readSse(response, (event, data) => {
+      if (event === 'session') {
+        setSessionId((data as SessionEvent).sessionId);
+      } else if (event === 'step') {
+        setSteps((prev) => [...prev, data as StepEvent]);
+      } else if (event === 'paused') {
+        setStatus('paused');
+      } else if (event === 'error') {
+        setErrorMessage((data as { message: string }).message);
+        setStatus('error');
+      } else if (event === 'done') {
+        setDoneInfo(data as DoneEvent);
+        setStatus('done');
+      }
+    });
+    // 'paused' is a terminal SSE state on its own (the response ends right
+    // after it), so only fall back to 'done' when nothing else already
+    // set a more specific status.
+    setStatus((current) => (current === 'running' ? 'done' : current));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSteps([]);
     setDoneInfo(null);
     setErrorMessage(null);
+    setSessionId(null);
     setStatus('running');
 
     try {
       const response = await fetch('/api/design-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description, provider }),
+        body: JSON.stringify({ description, provider, stepMode }),
       });
+      await consumeStream(response);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+      setStatus('error');
+    }
+  }
 
-      await readSse(response, (event, data) => {
-        if (event === 'step') {
-          setSteps((prev) => [...prev, data as StepEvent]);
-        } else if (event === 'error') {
-          setErrorMessage((data as { message: string }).message);
-          setStatus('error');
-        } else if (event === 'done') {
-          setDoneInfo(data as DoneEvent);
-          setStatus('done');
-        }
+  async function handleContinue(mode: 'step' | 'auto') {
+    if (!sessionId) return;
+    setErrorMessage(null);
+    setStatus('running');
+
+    try {
+      const response = await fetch('/api/design-session/continue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, mode }),
       });
-
-      setStatus((current) => (current === 'error' ? current : 'done'));
+      await consumeStream(response);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setStatus('error');
@@ -84,34 +122,46 @@ export default function Page() {
         </Link>
       </p>
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 12, marginBottom: 32 }}>
-        <textarea
-          data-testid="description-input"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-          style={{ flex: 1, background: '#1b2436', color: '#e6e9f0', border: '1px solid #2c3550', borderRadius: 8, padding: 10 }}
-        />
-        <select
-          data-testid="provider-select"
-          value={provider}
-          onChange={(e) => setProvider(e.target.value as 'gemini' | 'deepseek')}
-          style={{ background: '#1b2436', color: '#e6e9f0', border: '1px solid #2c3550', borderRadius: 8, padding: '0 8px' }}
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <button
-          data-testid="design-button"
-          type="submit"
-          disabled={status === 'running'}
-          style={{ padding: '0 20px', borderRadius: 8, border: 'none', background: '#5b8cff', color: 'white', cursor: 'pointer' }}
-        >
-          {status === 'running' ? 'Designing…' : 'Design it'}
-        </button>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <textarea
+            data-testid="description-input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            style={{ flex: 1, background: '#1b2436', color: '#e6e9f0', border: '1px solid #2c3550', borderRadius: 8, padding: 10 }}
+          />
+          <select
+            data-testid="provider-select"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as 'gemini' | 'deepseek')}
+            style={{ background: '#1b2436', color: '#e6e9f0', border: '1px solid #2c3550', borderRadius: 8, padding: '0 8px' }}
+          >
+            {PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <button
+            data-testid="design-button"
+            type="submit"
+            disabled={status === 'running'}
+            style={{ padding: '0 20px', borderRadius: 8, border: 'none', background: '#5b8cff', color: 'white', cursor: 'pointer' }}
+          >
+            {status === 'running' ? 'Designing…' : 'Design it'}
+          </button>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#8b96b3' }}>
+          <input
+            type="checkbox"
+            data-testid="step-mode-checkbox"
+            checked={stepMode}
+            disabled={status === 'running'}
+            onChange={(e) => setStepMode(e.target.checked)}
+          />
+          Step through manually -- pause after every step
+        </label>
       </form>
 
       {errorMessage && <p data-testid="error-message" style={{ color: '#ff6b6b' }}>{errorMessage}</p>}
@@ -165,6 +215,26 @@ export default function Page() {
           </section>
         ))}
       </div>
+
+      {status === 'paused' && (
+        <div data-testid="paused-controls" style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8 }}>
+          <span style={{ fontSize: 13, color: '#8b96b3' }}>Paused after step {steps.length}.</span>
+          <button
+            data-testid="continue-step-button"
+            onClick={() => handleContinue('step')}
+            style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: '#5b8cff', color: 'white', cursor: 'pointer' }}
+          >
+            Continue &rarr;
+          </button>
+          <button
+            data-testid="continue-auto-button"
+            onClick={() => handleContinue('auto')}
+            style={{ padding: '6px 16px', borderRadius: 8, border: '1px solid #2c3550', background: 'transparent', color: '#e6e9f0', cursor: 'pointer' }}
+          >
+            Finish automatically
+          </button>
+        </div>
+      )}
 
       {status === 'done' && doneInfo && doneInfo.reason !== 'step_exhausted' && (
         <p data-testid="session-done">
