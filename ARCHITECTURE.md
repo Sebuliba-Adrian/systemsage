@@ -553,6 +553,46 @@ real, non-trivial answer; a browser test confirms the same through the
 actual UI, and that asking does not consume the step or break
 continuation afterward.
 
+## Narration is finally heard, not just synthesized
+
+`packages/narrator`'s Gemini TTS call was built and proven live
+(`e2e/tests/narrator.spec.ts`) early in this project, but nothing ever
+played the audio it produced -- a real capability sitting completely
+unused, the same category of gap as the p99 stat that was computed, sent
+over the wire, and never rendered. Fixed with the smallest wiring that
+actually plays real audio in a real browser:
+
+- `POST /api/narrate` (`{ text }`) calls `narrate()` and returns the raw
+  WAV bytes directly as the response body -- no JSON/base64
+  round-tripping; the browser's `<audio>` element consumes an object URL
+  built straight from the fetched blob.
+- `page.tsx` caches synthesized audio by the exact text synthesized (a
+  `Map<string, string>` of object URLs), so asking the same question twice
+  or manually replaying an auto-narrated step never re-synthesizes.
+- Two ways to hear it: a per-step/per-answer "▶" button (always
+  available), and a "Narrate automatically" checkbox that plays the newest
+  step or scrutiny answer the instant it arrives -- wired into the SAME
+  `steps`/`qaLog` state every entry path (`initial run, "Continue",
+  "Finish automatically", asking a question) already updates, so auto-
+  narration works identically no matter which of those produced the new
+  content.
+- A `NotAllowedError` from `<audio>.play()` (the browser's autoplay policy
+  blocking playback that didn't originate from a direct click) is
+  surfaced as its own specific, actionable message rather than a generic
+  failure.
+
+Deliberately non-streaming, matching what `packages/narrator`'s own doc
+comment already flagged as the next real improvement (chunk-as-you-go
+playback) rather than silently deciding it doesn't matter.
+
+Proven four ways in `e2e/tests/narrate-route.spec.ts` and
+`e2e/tests/narration-ui.spec.ts`: the endpoint returns real, valid WAV
+bytes (checked by its actual RIFF/WAVE header and declared PCM size, not
+just a 200 status) and refuses a missing `text` with a real 400; a real
+browser click on a step's "▶" button drives the `<audio>` element's
+`paused` property to `false` with a real `blob:` URL; and the "Narrate
+automatically" checkbox does the same without any click at all.
+
 ## Deliberately deferred, not forgotten
 
 - The actual mobile app. Architecture is shaped for it now; building it is

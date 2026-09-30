@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { SimEdge, SimNode, SystemStats } from '@systemsage/engine';
 import { Canvas } from './components/Canvas';
@@ -52,6 +52,71 @@ export default function Page() {
   const [qaLog, setQaLog] = useState<QaEntry[]>([]);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
+  const [narrateEnabled, setNarrateEnabled] = useState(false);
+  const [loadingAudioFor, setLoadingAudioFor] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioCache = useRef<Map<string, string>>(new Map());
+  const narratedStepCount = useRef(0);
+  const narratedQaCount = useRef(0);
+
+  // Real audio (packages/narrator's Gemini TTS), fetched once per distinct
+  // line of text and cached by an object URL -- asking the same question
+  // twice, or an auto-narrated step someone also clicks "Play" on, never
+  // re-synthesizes. A NotAllowedError specifically means the browser's
+  // autoplay policy blocked it (nothing played yet because this call
+  // happened outside a direct click), not a real failure -- surfaced as
+  // its own message rather than a generic one.
+  async function playText(text: string) {
+    const audio = audioRef.current;
+    if (!audio || !text) return;
+    try {
+      let url = audioCache.current.get(text);
+      if (!url) {
+        setLoadingAudioFor(text);
+        const response = await fetch('/api/narrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as { message?: string };
+          throw new Error(data.message ?? 'Narration failed');
+        }
+        const blob = await response.blob();
+        url = URL.createObjectURL(blob);
+        audioCache.current.set(text, url);
+      }
+      audio.src = url;
+      await audio.play();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        setErrorMessage('Browser blocked autoplay -- click the ▶ button on a step to hear it.');
+      } else {
+        setErrorMessage(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setLoadingAudioFor(null);
+    }
+  }
+
+  // Auto-narrate the newest step or answer, regardless of which action
+  // produced it (initial run, "Continue", "Finish automatically", or a new
+  // question) -- all of them land in the same `steps`/`qaLog` state.
+  useEffect(() => {
+    if (narrateEnabled && steps.length > narratedStepCount.current) {
+      playText(steps[steps.length - 1].narration);
+    }
+    narratedStepCount.current = steps.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps, narrateEnabled]);
+
+  useEffect(() => {
+    if (narrateEnabled && qaLog.length > narratedQaCount.current) {
+      playText(qaLog[qaLog.length - 1].answer);
+    }
+    narratedQaCount.current = qaLog.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qaLog, narrateEnabled]);
 
   // Shared by the initial POST and every /continue call: read the same SSE
   // event shapes, land in the same state. A step taken via "Continue" or
@@ -197,7 +262,19 @@ export default function Page() {
           />
           Step through manually -- pause after every step
         </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#8b96b3' }}>
+          <input
+            type="checkbox"
+            data-testid="narrate-checkbox"
+            checked={narrateEnabled}
+            onChange={(e) => setNarrateEnabled(e.target.checked)}
+          />
+          Narrate automatically (real audio, via Gemini TTS)
+        </label>
       </form>
+
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption -- narration, not video */}
+      <audio ref={audioRef} data-testid="narration-audio" style={{ display: 'none' }} />
 
       {errorMessage && <p data-testid="error-message" style={{ color: '#ff6b6b' }}>{errorMessage}</p>}
 
@@ -208,11 +285,22 @@ export default function Page() {
               <h3>
                 Step {step.index + 1}: {step.stepTitle}
               </h3>
-              {step.isFinalStep && (
-                <span style={{ fontSize: 12, color: '#7ee787', border: '1px solid #2c5c3a', borderRadius: 6, padding: '2px 8px' }}>
-                  final step
-                </span>
-              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  data-testid="play-narration-button"
+                  onClick={() => playText(step.narration)}
+                  disabled={loadingAudioFor === step.narration}
+                  style={{ fontSize: 12, padding: '2px 10px', borderRadius: 6, border: '1px solid #2c3550', background: 'transparent', color: '#e6e9f0', cursor: 'pointer' }}
+                >
+                  {loadingAudioFor === step.narration ? '…' : '▶'}
+                </button>
+                {step.isFinalStep && (
+                  <span style={{ fontSize: 12, color: '#7ee787', border: '1px solid #2c5c3a', borderRadius: 6, padding: '2px 8px' }}>
+                    final step
+                  </span>
+                )}
+              </div>
             </div>
             {step.attempts > 1 && (
               <div
@@ -255,9 +343,20 @@ export default function Page() {
         <div data-testid="qa-log" style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
           {qaLog.map((qa, i) => (
             <div key={i} data-testid="qa-entry" style={{ border: '1px solid #2c3550', borderRadius: 8, padding: 12 }}>
-              <p style={{ margin: 0, color: '#7ee787', fontSize: 13 }} data-testid="qa-question">
-                Q: {qa.question}
-              </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <p style={{ margin: 0, color: '#7ee787', fontSize: 13 }} data-testid="qa-question">
+                  Q: {qa.question}
+                </p>
+                <button
+                  type="button"
+                  data-testid="play-answer-button"
+                  onClick={() => playText(qa.answer)}
+                  disabled={loadingAudioFor === qa.answer}
+                  style={{ fontSize: 12, padding: '2px 10px', borderRadius: 6, border: '1px solid #2c3550', background: 'transparent', color: '#e6e9f0', cursor: 'pointer', flexShrink: 0 }}
+                >
+                  {loadingAudioFor === qa.answer ? '…' : '▶'}
+                </button>
+              </div>
               <p style={{ margin: '6px 0 0', fontSize: 14 }} data-testid="qa-answer">
                 {qa.answer}
               </p>
